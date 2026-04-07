@@ -1,0 +1,106 @@
+---
+title: 'Extending configurations'
+description: 'Inherit rules from the built-in default config or a custom base config, then override or disable individual rules as needed.'
+---
+
+The `[extend]` block lets a gitleaks config inherit rules and allowlists from another config. This is the recommended way to customise detection without rewriting the entire default ruleset from scratch.
+
+## The [extend] block
+
+```toml
+[extend]
+useDefault    = true          # extend the built-in default config
+# path        = "base.toml"  # OR extend from a file — cannot use both
+disabledRules = ["generic-api-key"]
+```
+
+<Warning>
+  `useDefault` and `path` are mutually exclusive. Setting both causes gitleaks to exit with an error:
+  `unable to load config due to extend.path and extend.useDefault being set`.
+</Warning>
+
+## Extending the default config
+
+Set `useDefault = true` to start from the complete set of rules compiled into the gitleaks binary. Your `[[rules]]` entries are then merged on top.
+
+The latest default config is available at [gitleaks/gitleaks/blob/master/config/gitleaks.toml](https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml).
+
+```toml
+title = "My organisation's config"
+
+[extend]
+useDefault = true
+```
+
+## Extending from a file
+
+Set `path` to a relative or absolute path to inherit from a custom base config. The path is resolved **relative to the directory from which gitleaks is invoked**, not relative to the config file itself.
+
+```toml
+[extend]
+path = "common_config.toml"
+```
+
+## Disabling inherited rules
+
+Use `disabledRules` to exclude specific rules from the extended config. This is useful when a rule from the default set produces too many false positives in your codebase.
+
+```toml
+[extend]
+useDefault    = true
+disabledRules = ["generic-api-key"]
+```
+
+If a rule ID listed in `disabledRules` does not exist in the extended config, gitleaks logs a warning rather than failing.
+
+## How rules are merged
+
+When your config extends another, the following merge logic applies:
+
+- **New rule** (your config defines a rule ID not present in the base): the rule is added as-is.
+- **Override** (your config defines a rule ID that also exists in the base): your values overwrite the base rule's fields. Specifically:
+  - `description`, `entropy`, `secretGroup`, `regex`, and `path` are replaced if you provide them.
+  - `tags`, `keywords`, and `allowlists` are **appended** — values from both configs are combined.
+- **Global allowlists** are always **appended** — the lists from your config and the base config are merged, not replaced.
+
+<Note>
+  Extended rules take precedence over default rules. If you redefine a rule that exists in the base, your definition wins for the fields you specify; fields you omit are inherited from the base.
+</Note>
+
+## Example: extending the default config and overriding one rule
+
+The following example extends the default config, disables the broad `generic-api-key` rule, and overrides `gitlab-pat` to add an allowlist for a custom GitLab token prefix used internally:
+
+```toml
+title = "Custom Gitleaks configuration"
+
+[extend]
+useDefault    = true
+disabledRules = ["generic-api-key"]
+
+# Override the gitlab-pat rule from the default config.
+# All other attributes (regex, description, entropy, keywords) are inherited.
+[[rules]]
+id = "gitlab-pat"
+
+    [[rules.allowlists]]
+    regexTarget = "line"
+    regexes     = ['''MY-glpat-''']
+```
+
+## Chaining configs
+
+Extended configs can themselves extend another config, up to a depth of 2. For example:
+
+- `my-config.toml` extends `team-config.toml`
+- `team-config.toml` extends `company-base.toml`
+
+This chain is allowed (depth 2). A fourth level would be silently ignored because `maxExtendDepth = 2` is enforced in the gitleaks source.
+
+<Tip>
+  Chaining is useful when multiple teams share a common base and each team adds their own layer of overrides. Keep chains shallow to avoid unexpected rule inheritance.
+</Tip>
+
+## Allowlist behaviour when extending
+
+Global `[[allowlists]]` from the extended config are **appended** to those in your config — they are not replaced. This means all allowlists from both configs are active. Duplicate entries are allowed and will both be evaluated (they are not deduplicated).

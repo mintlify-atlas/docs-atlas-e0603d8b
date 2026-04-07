@@ -1,0 +1,198 @@
+---
+title: "Composite rules"
+description: "Require multiple patterns to co-occur in a fragment before reporting a finding, using [[rules.required]] proximity constraints."
+---
+
+<Warning>
+Composite rules are an experimental feature introduced in v8.28.0. The behavior and configuration format are subject to change in future versions.
+</Warning>
+
+A composite rule is a primary rule that only fires when one or more auxiliary rules also match within the same fragment of content. This lets you require multiple signals to co-occur before reporting a finding, reducing false positives for rules that are ambiguous in isolation.
+
+## Concept
+
+A standard rule fires whenever its `regex` matches. A composite rule adds a dependency: the primary rule's regex must match **and** each `required` auxiliary rule must also match. The proximity constraints (`withinLines`, `withinColumns`) control how close the required matches must be to the primary match.
+
+A **fragment** is the unit of content Gitleaks processes at once — typically a file, a section of a file, or a git diff hunk.
+
+## Configuration
+
+Add a `[[rules.required]]` table to the primary rule. Each `[[rules.required]]` entry requires:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | Yes | The `id` of the auxiliary rule that must also match |
+| `withinLines` | int | No | Primary and auxiliary matches must be within this many lines of each other |
+| `withinColumns` | int | No | Primary and auxiliary matches must be within this many columns of each other |
+
+```toml
+[[rules]]
+id = "my-primary-rule"
+description = "Detects a secret only when a known hostname is nearby"
+regex = '''(?i)password\s*=\s*["']?([a-z0-9]{16,})'''
+secretGroup = 1
+keywords = ["password"]
+
+  [[rules.required]]
+  id = "my-hostname-rule"
+  withinLines = 5
+
+[[rules]]
+id = "my-hostname-rule"
+description = "Matches a known internal hostname"
+regex = '''internal\.example\.com'''
+skipReport = true
+```
+
+### `skipReport`
+
+Set `skipReport = true` on any rule that should only be used as an auxiliary rule and never generate its own findings. This is the typical pattern for helper rules used exclusively in `[[rules.required]]` references.
+
+## Proximity modes
+
+The `withinLines` and `withinColumns` fields define four distinct matching behaviors.
+
+### Fragment-level (no constraints)
+
+When neither `withinLines` nor `withinColumns` is set, the required rule only needs to match **anywhere** in the same fragment. The primary and auxiliary matches can be far apart.
+
+```
+p = primary captured secret
+a = auxiliary (required) captured secret
+
+    *Fragment-level proximity*
+    Any required finding in the fragment
+          ┌────────┐
+   ┌──────┤fragment├─────┐
+   │      └──────┬─┤     │ ┌───────┐
+   │             │a│◀────┼─│✓ MATCH│
+   │          ┌─┐└─┘     │ └───────┘
+   │┌─┐       │p│        │
+   ││a│    ┌─┐└─┘        │ ┌───────┐
+   │└─┘    │a│◀──────────┼─│✓ MATCH│
+   └─▲─────┴─┴───────────┘ └───────┘
+     │    ┌───────┐
+     └────│✓ MATCH│
+          └───────┘
+```
+
+```toml
+[[rules.required]]
+id = "my-hostname-rule"
+# no withinLines or withinColumns
+```
+
+### Column-bounded
+
+When only `withinColumns` is set, the required match must be within N columns of the primary match horizontally. There is no vertical constraint.
+
+```
+   *Column bounded proximity*
+   `withinColumns = 3`
+          ┌────────┐
+   ┌────┬─┤fragment├─┬───┐
+   │      └──────┬─┤     │ ┌───────────┐
+   │    │        │a│◀┼───┼─│+1C ✓ MATCH│
+   │          ┌─┐└─┘     │ └───────────┘
+   │┌─┐ │     │p│    │   │
+┌──▶│a│  ┌─┐  └─┘        │ ┌───────────┐
+│  │└─┘ ││a│◀────────┼───┼─│-2C ✓ MATCH│
+│  │       ┘             │ └───────────┘
+│  └── -3C ───0C─── +3C ─┘
+│  ┌─────────┐
+│  │ -4C ✗ NO│
+└──│  MATCH  │
+   └─────────┘
+```
+
+```toml
+[[rules.required]]
+id = "my-hostname-rule"
+withinColumns = 3
+```
+
+### Line-bounded
+
+When only `withinLines` is set, the required match must be within N lines of the primary match vertically. There is no horizontal constraint.
+
+```
+   *Line bounded proximity*
+   `withinLines = 4`
+         ┌────────┐
+   ┌─────┤fragment├─────┐
+  +4L─ ─ ┴────────┘─ ─ ─│
+   │                    │
+   │              ┌─┐   │ ┌────────────┐
+   │         ┌─┐  │a│◀──┼─│+1L ✓ MATCH │
+   0L  ┌─┐   │p│  └─┘   │ ├────────────┤
+   │   │a│◀──┴─┴────────┼─│-1L ✓ MATCH │
+   │   └─┘              │ └────────────┘
+   │                    │ ┌─────────┐
+  -4L─ ─ ─ ─ ─ ─ ─ ─┌─┐─│ │-5L ✗ NO │
+   │                │a│◀┼─│  MATCH  │
+   └────────────────┴─┴─┘ └─────────┘
+```
+
+```toml
+[[rules.required]]
+id = "my-hostname-rule"
+withinLines = 4
+```
+
+### Line and column bounded
+
+When both constraints are set, the required match must fall within a rectangular area defined by both limits simultaneously.
+
+```
+   *Line and column bounded proximity*
+   `withinLines = 4`
+   `withinColumns = 3`
+         ┌────────┐
+   ┌─────┤fragment├─────┐
+  +4L   ┌└────────┴ ┐   │
+   │            ┌─┐     │ ┌───────────────┐
+   │    │       │a│◀┼───┼─│+2L/+1C ✓ MATCH│
+   │         ┌─┐└─┘     │ └───────────────┘
+   0L   │    │p│    │   │
+   │         └─┘        │
+   │    │           │   │ ┌────────────┐
+  -4L    ─ ─ ─ ─ ─ ─┌─┐ │ │-5L/+3C ✗ NO│
+   │                │a│◀┼─│   MATCH    │
+   └───-3C────0L───+3C┴─┘ └────────────┘
+```
+
+```toml
+[[rules.required]]
+id = "my-hostname-rule"
+withinLines = 4
+withinColumns = 3
+```
+
+## Full example
+
+This example detects an AWS secret access key only when the corresponding access key ID is found nearby, preventing standalone secret-shaped strings from triggering a finding.
+
+```toml
+[[rules]]
+id = "aws-secret-key-with-id"
+description = "AWS Secret Access Key found near an Access Key ID"
+regex = '''(?i)aws.{0,20}['"]?([a-zA-Z0-9\/+]{40})['"]?'''
+secretGroup = 1
+entropy = 3.5
+keywords = ["aws"]
+
+  [[rules.required]]
+  id = "aws-access-key-id"
+  withinLines = 5
+
+[[rules]]
+id = "aws-access-key-id"
+description = "AWS Access Key ID"
+regex = '''(AKIA[0-9A-Z]{16})'''
+secretGroup = 1
+skipReport = true
+```
+
+## Scan type considerations
+
+Composite rules are more effective in `dir` scans than in `git` scans. In `git` mode, Gitleaks only examines additions in the diff, so if the primary and required matches are not both part of the same diff hunk, they may not appear in the same fragment and the required constraint will not be satisfied.

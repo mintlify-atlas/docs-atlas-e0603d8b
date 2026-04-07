@@ -1,0 +1,88 @@
+---
+title: "Introduction"
+description: "Gitleaks is an open-source SAST tool for detecting hardcoded secrets — API keys, tokens, passwords, and credentials — in git repositories, directories, and stdin."
+---
+
+Gitleaks scans code, past or present, for secrets. It works against git history, file trees, and arbitrary input streamed through stdin. When a secret is found, Gitleaks reports it with full context: the matched value, the rule that triggered, the file, the commit, the author, and a unique fingerprint you can use to track or suppress the finding.
+
+## What Gitleaks detects
+
+Gitleaks finds credentials that should not be committed to source control, including:
+
+- **API keys** — cloud provider credentials, service tokens, and platform API keys
+- **Passwords** — hardcoded database passwords, service account passwords
+- **Private tokens** — personal access tokens, OAuth tokens, session keys
+- **Generic secrets** — high-entropy strings that match known secret patterns
+
+The default ruleset covers 150+ secret types across common services and platforms. You can extend or replace the ruleset with your own TOML configuration.
+
+## How detection works
+
+Each detection rule has three components that work together:
+
+1. **Regular expression** — a Go regex that matches the shape of a secret. Gitleaks uses this as the primary match condition.
+2. **Entropy threshold** — an optional minimum Shannon entropy value for the captured group. High-entropy strings are more likely to be real secrets rather than placeholder values.
+3. **Keyword prefilter** — a list of keywords that must appear near the match before the regex is evaluated. This fast string check reduces unnecessary regex evaluation and speeds up scanning.
+
+When all conditions for a rule are satisfied, Gitleaks records a finding. Each finding includes the extracted secret value, the rule ID, the entropy of the matched group, and location context.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Three scanning modes" icon="terminal">
+    Scan git repositories with `git`, file trees with `dir`, or pipe content through `stdin`. Each mode is optimized for its input type.
+  </Card>
+  <Card title="150+ built-in rules" icon="shield-halved">
+    The default config covers API keys, tokens, and credentials for over 150 services and platforms. No setup required to start detecting.
+  </Card>
+  <Card title="CI/CD integrations" icon="plug">
+    Official GitHub Action, pre-commit hook support, and Docker images make it straightforward to add Gitleaks to any pipeline.
+  </Card>
+  <Card title="Multiple report formats" icon="file-lines">
+    Export findings as JSON, CSV, JUnit, or SARIF. Use a Go `text/template` file for fully custom output formats.
+  </Card>
+  <Card title="Configurable rules" icon="sliders">
+    Write custom rules in TOML, extend the default config, disable specific rules, or add per-rule and global allowlists.
+  </Card>
+  <Card title="Allowlists and ignore files" icon="circle-check">
+    Suppress false positives with `gitleaks:allow` inline comments, a `.gitleaksignore` file, or allowlist entries in your config.
+  </Card>
+</CardGroup>
+
+## Example finding
+
+When Gitleaks detects a secret, it prints a structured finding to the terminal. Each field tells you exactly what was found and where:
+
+```text
+Finding:     "export BUNDLE_ENTERPRISE__CONTRIBSYS__COM=cafebabe:deadbeef",
+Secret:      cafebabe:deadbeef
+RuleID:      sidekiq-secret
+Entropy:     2.609850
+File:        cmd/generate/config/rules/sidekiq.go
+Line:        23
+Commit:      cd5226711335c68be1e720b318b7bc3135a30eb2
+Author:      John
+Email:       john@users.noreply.github.com
+Date:        2022-08-03T12:31:40Z
+Fingerprint: cd5226711335c68be1e720b318b7bc3135a30eb2:cmd/generate/config/rules/sidekiq.go:sidekiq-secret:23
+```
+
+The `Fingerprint` field uniquely identifies this finding. You can add it to a `.gitleaksignore` file to suppress it in future scans, or use it as a stable identifier when tracking remediations.
+
+## Exit codes
+
+Gitleaks uses predictable exit codes so it integrates cleanly into scripts and CI pipelines:
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | No leaks found |
+| `1` | Leaks or error encountered |
+| `126` | Unknown flag |
+
+You can override the exit code for leak findings with `--exit-code`.
+
+## Next steps
+
+<Card title="Quickstart" icon="rocket" href="/quickstart">
+  Run your first scan in a few commands.
+</Card>

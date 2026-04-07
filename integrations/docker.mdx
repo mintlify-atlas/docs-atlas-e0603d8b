@@ -1,0 +1,127 @@
+---
+title: "Docker"
+description: "Run Gitleaks using the official Docker images from Docker Hub or GitHub Container Registry without installing any local dependencies."
+---
+
+## Available images
+
+Gitleaks publishes official images to two registries:
+
+<CardGroup cols={2}>
+  <Card title="Docker Hub" icon="docker">
+    `zricethezav/gitleaks:latest`
+  </Card>
+  <Card title="GitHub Container Registry" icon="github">
+    `ghcr.io/gitleaks/gitleaks:latest`
+  </Card>
+</CardGroup>
+
+Images are built for `linux/amd64` and `linux/arm64` platforms and are tagged per release version (e.g., `v8.24.2`) as well as `latest`.
+
+## Image structure
+
+The Gitleaks Docker image uses a two-stage build:
+
+1. **Build stage** — compiles the gitleaks binary from source using `golang:1.24`
+2. **Runtime stage** — copies the binary into an `alpine:3.22` base image with `bash`, `git`, and `openssh-client` installed
+
+The image entrypoint is `gitleaks`, so any arguments you pass to `docker run` are forwarded directly to the gitleaks CLI.
+
+Git's `safe.directory` is set to `*` globally in the image, which is required for scanning repositories mounted as volumes.
+
+## Pulling the image
+
+<Tabs>
+  <Tab title="Docker Hub">
+    ```bash
+    docker pull zricethezav/gitleaks:latest
+    ```
+  </Tab>
+  <Tab title="GHCR">
+    ```bash
+    docker pull ghcr.io/gitleaks/gitleaks:latest
+    ```
+  </Tab>
+  <Tab title="Specific version">
+    ```bash
+    docker pull zricethezav/gitleaks:v8.24.2
+    ```
+  </Tab>
+</Tabs>
+
+## Basic usage
+
+The general pattern is to mount the directory you want to scan as a volume and then pass the appropriate gitleaks command and source path:
+
+```bash
+docker run -v ${path_to_host_folder_to_scan}:/path zricethezav/gitleaks:latest [COMMAND] [OPTIONS] [SOURCE_PATH]
+```
+
+## Common examples
+
+<CodeGroup>
+
+```bash Scan current directory (git repo)
+docker run -v $(pwd):/path zricethezav/gitleaks:latest git /path
+```
+
+```bash Scan a specific directory on the host
+docker run -v /home/user/myrepo:/path zricethezav/gitleaks:latest git /path
+```
+
+```bash Scan a directory (non-git)
+docker run -v $(pwd):/path zricethezav/gitleaks:latest dir /path
+```
+
+```bash Use a custom config file
+docker run \
+  -v $(pwd):/path \
+  -v $(pwd)/.gitleaks.toml:/config/.gitleaks.toml \
+  zricethezav/gitleaks:latest git --config /config/.gitleaks.toml /path
+```
+
+```bash Write report to host filesystem
+docker run \
+  -v $(pwd):/path \
+  zricethezav/gitleaks:latest git \
+    --report-format json \
+    --report-path /path/gitleaks-report.json \
+    /path
+```
+
+</CodeGroup>
+
+<Note>
+  The volume mount maps your host directory to `/path` inside the container. Always use the container-side path (e.g., `/path`) as the `SOURCE_PATH` argument, not the host path.
+</Note>
+
+## Using the GHCR image
+
+Replace the image name in any of the examples above:
+
+```bash
+docker run -v $(pwd):/path ghcr.io/gitleaks/gitleaks:latest git /path
+```
+
+## Using specific version tags
+
+Pinning to a specific version is recommended for reproducible CI environments:
+
+```bash
+docker run -v $(pwd):/path zricethezav/gitleaks:v8.24.2 git /path
+```
+
+<Tip>
+  In CI pipelines, pin to a specific version tag rather than `latest` to avoid unexpected behavior when new versions are released. The `latest` tag always points to the most recent release.
+</Tip>
+
+## Using Docker in CI environments
+
+When running the container in CI, pass the repository checkout path as the volume source. Most CI systems expose a workspace path as an environment variable:
+
+```bash
+# Example using a generic CI workspace variable
+docker run -v ${CI_WORKSPACE}:/path zricethezav/gitleaks:latest git /path
+```
+
+For git history scanning to work correctly, ensure the CI checkout fetches full history (equivalent to `fetch-depth: 0` in GitHub Actions) before running the container.

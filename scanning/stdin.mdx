@@ -1,0 +1,140 @@
+---
+title: "Scanning from stdin"
+description: "Use gitleaks stdin to detect secrets in piped input from other commands or tools."
+---
+
+The `gitleaks stdin` command reads data from standard input and scans it for
+secrets. This lets you pipe output from any other tool directly into gitleaks
+without writing to a file first.
+
+```bash
+gitleaks stdin
+```
+
+There are no positional arguments. All input is read from stdin.
+
+<Note>
+  When scanning from stdin, gitleaks cannot generate a report file if the scan
+  fails partway through. The scan result is logged to stderr.
+</Note>
+
+## Basic usage
+
+```bash
+# Scan the contents of a file via pipe
+cat secrets.env | gitleaks -v stdin
+
+# Scan the output of another command
+env | gitleaks stdin
+
+# Scan with verbose output and a custom exit code
+cat config.yaml | gitleaks -v --exit-code 2 stdin
+```
+
+## Use cases
+
+<CardGroup cols={2}>
+  <Card title="Scanning command output" icon="terminal">
+    Pipe the output of any shell command — environment dumps, config exports,
+    log files — directly into gitleaks for ad-hoc secret detection.
+  </Card>
+  <Card title="CI pipeline integration" icon="circle-play">
+    Insert gitleaks into a pipeline step that already produces output, without
+    requiring a separate checkout or file write step.
+  </Card>
+</CardGroup>
+
+## Pipeline examples
+
+<CodeGroup>
+
+```bash Scan a file via cat
+cat /path/to/config.yaml | gitleaks -v stdin
+```
+
+```bash Scan environment variables
+env | gitleaks stdin
+```
+
+```bash Scan output of a script
+./export-config.sh | gitleaks --exit-code 0 stdin
+```
+
+```bash Scan with a custom config
+cat secrets.txt | gitleaks --config /path/to/.gitleaks.toml stdin
+```
+
+```bash Scan and redact secrets in output
+cat app.log | gitleaks -v --redact stdin
+```
+
+</CodeGroup>
+
+## Global flags
+
+<ParamField path="-v, --verbose" type="boolean" default="false">
+  Print each finding to stdout as it is detected.
+</ParamField>
+
+<ParamField path="-c, --config" type="string" default="">
+  Path to a `.gitleaks.toml` configuration file. Config resolution order:
+  1. `--config` / `-c` flag
+  2. `GITLEAKS_CONFIG` environment variable (file path)
+  3. `GITLEAKS_CONFIG_TOML` environment variable (file content)
+  4. `.gitleaks.toml` in the current working directory
+
+  Falls back to the built-in default config if none are found.
+</ParamField>
+
+<ParamField path="--exit-code" type="number" default="1">
+  Exit code returned when leaks are found. Set to `0` to avoid breaking
+  pipelines when findings are expected or handled downstream.
+</ParamField>
+
+<ParamField path="--redact" type="number" default="100">
+  Redact secrets from logs and stdout. Accepts a percentage from `0` to `100`.
+  `--redact` alone defaults to `100%`. Example: `--redact=20`.
+</ParamField>
+
+<ParamField path="-l, --log-level" type="string" default="info">
+  Log verbosity level. Accepted values: `trace`, `debug`, `info`, `warn`,
+  `error`, `fatal`.
+</ParamField>
+
+<ParamField path="--max-archive-depth" type="number" default="0">
+  If the piped content is an archive, scan into nested archives up to this
+  depth. `0` disables archive traversal.
+</ParamField>
+
+<ParamField path="--max-decode-depth" type="number" default="5">
+  Recursively decode encoded content (base64, hex, percent) up to this many
+  levels deep. `0` disables decoding.
+</ParamField>
+
+<ParamField path="--enable-rule" type="string[]" default="[]">
+  Run only the specified rule IDs. All other rules are disabled.
+</ParamField>
+
+<ParamField path="--ignore-gitleaks-allow" type="boolean" default="false">
+  Ignore `gitleaks:allow` inline comments in the scanned content.
+</ParamField>
+
+<ParamField path="--no-color" type="boolean" default="false">
+  Disable color in verbose output.
+</ParamField>
+
+<ParamField path="--no-banner" type="boolean" default="false">
+  Suppress the gitleaks ASCII banner.
+</ParamField>
+
+<ParamField path="--timeout" type="number" default="0">
+  Abort the scan after this many seconds. `0` means no timeout.
+</ParamField>
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0`  | No secrets found |
+| `1`  | Secrets found, or a fatal error occurred |
+| `126` | Unknown flag provided |

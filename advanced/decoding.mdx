@@ -1,0 +1,132 @@
+---
+title: "Decoding encoded secrets"
+description: "Automatically detect secrets hidden inside base64, hex, percent-encoded, and unicode-encoded text using --max-decode-depth."
+---
+
+Secrets are sometimes stored in encoded form — base64-encoded environment variables, hex-encoded tokens in configuration files, or percent-encoded values in URLs. Standard regex rules can't match these because the secret value is obscured by the encoding layer.
+
+Gitleaks can automatically find, decode, and scan encoded content by enabling the `--max-decode-depth` flag.
+
+```bash
+# Enable decoding with a recursion depth of 5
+gitleaks dir --max-decode-depth 5 /path/to/scan
+```
+
+The default value is `5`. Set to `0` to disable decoding entirely.
+
+## Supported encodings
+
+Gitleaks supports four encoding types, detected via a single combined regex pass over each fragment of content.
+
+<AccordionGroup>
+  <Accordion title="percent — URL percent-encoding">
+    Matches any sequence of `%XX` escape sequences where `XX` are hex digits and the decoded bytes are printable ASCII.
+
+    Pattern: `%[0-9A-Fa-f]{2}(?:.*%[0-9A-Fa-f]{2})?`
+
+    **Example:** `MY_TOKEN=%73%65%63%72%65%74%76%61%6C%75%65` decodes to `MY_TOKEN=secretvalue`
+
+    Percent encoding has the highest precedence among the supported encodings. When a percent-encoded segment overlaps with a hex-encoded segment, the percent-encoded interpretation is used.
+  </Accordion>
+
+  <Accordion title="unicode — Unicode escape sequences">
+    Matches Unicode code points in `U+XXXX` notation or programming language escape sequences like `\uXXXX` and `\\uXXXX`.
+
+    Pattern: `(?:(?:U\+[a-fA-F0-9]{4}(?:\s|$))+|(?i)(?:\\{1,2}u[a-fA-F0-9]{4})+)`
+
+    **Examples:**
+    - `\u0073\u0065\u0063\u0072\u0065\u0074` decodes to `secret`
+    - `U+0073 U+0065 U+0063 U+0072 U+0065 U+0074` decodes to `secret`
+
+    Both continuous sequences and individual code points are supported.
+  </Accordion>
+
+  <Accordion title="hex — hexadecimal encoding">
+    Matches sequences of hex characters that are at least 32 characters long, where every decoded byte is printable ASCII and the total length is even. The string must also contain at least one digit (`0-9`) to avoid matching identifiers that happen to use only `a-f` letters.
+
+    Pattern: `[0-9A-Fa-f]{32,}`
+
+    **Example:** `736563726574` (12 chars) would not match the minimum length; `736563726574736563726574736563726574` (36 chars) would decode to `secrettokensecrettokensecrettoken`
+
+    <Note>
+    The minimum length of 32 hex characters corresponds to a minimum decoded length of 16 bytes, reducing false positives from short hex identifiers.
+    </Note>
+  </Accordion>
+
+  <Accordion title="base64 — Base64 encoding">
+    Matches base64-encoded sequences of at least 16 characters (including URL-safe base64 with `+`, `-`, `/`, `_` characters and optional `=` padding). The decoded bytes must all be printable ASCII.
+
+    Pattern: `[\w\/+-]{16,}={0,2}`
+
+    Both standard (`base64.StdEncoding`) and URL-safe (`base64.RawURLEncoding`) variants are tried. The string must also contain at least one character from `0-9+/-_` to skip over plain word tokens.
+
+    **Example:** `c2VjcmV0dmFsdWU=` decodes to `secretvalue`
+  </Accordion>
+</AccordionGroup>
+
+## Encoding precedence
+
+When two encoding patterns overlap in the same region of text, the encoder with higher precedence wins. The precedence order from highest to lowest is:
+
+1. `percent`
+2. `unicode`
+3. `hex`
+4. `base64`
+
+This prevents a hex-encoded value from being misidentified as base64, for example.
+
+## Recursive decoding
+
+Encoded content can itself contain encoded content. Setting `--max-decode-depth` to a value greater than 1 enables recursive decoding:
+
+```bash
+gitleaks dir --max-decode-depth 3 /path/to/scan
+```
+
+Each pass decodes any newly found encoded segments. Recursion stops automatically when no new encoded segments are found, so a high depth limit does not force extra passes — it only sets the upper bound on how deep the recursion can go.
+
+<Tip>
+Overall, decoding only minimally increases scan times, so setting a depth of 3–5 is a reasonable default for most codebases.
+</Tip>
+
+## How findings differ for decoded content
+
+When a secret is found inside encoded text, the finding is adjusted in three ways compared to a normal finding:
+
+<Steps>
+  <Step title="Location points to the encoded text">
+    `StartLine`, `EndLine`, `StartColumn`, and `EndColumn` indicate the position of the **encoded** value in the source file, not the decoded value. If the regex match extends outside the encoded segment, the bounds are expanded to include that context.
+  </Step>
+  <Step title="Match and Secret contain the decoded value">
+    The `Match` and `Secret` fields contain the **decoded** string that triggered the rule, not the raw encoded text from the file.
+  </Step>
+  <Step title="Tags identify the encoding and depth">
+    The `Tags` field gains two additional entries:
+    - `decoded:<encoding>` — the encoding type (e.g., `decoded:base64`, `decoded:hex`, `decoded:percent`, `decoded:unicode`)
+    - `decode-depth:<depth>` — how many decode passes were needed (e.g., `decode-depth:1`)
+
+    For content that passed through multiple encodings, both encoding types appear (e.g., `decoded:base64` and `decoded:hex` when hex-inside-base64 is detected).
+  </Step>
+</Steps>
+
+### Example
+
+Given a file containing:
+
+```
+TOKEN=c2VjcmV0dmFsdWU=
+```
+
+With `--max-decode-depth 1`, the base64 string `c2VjcmV0dmFsdWU=` decodes to `secretvalue`. If that value matches a rule, the finding will look like:
+
+```
+File:        config.env
+StartLine:   1
+StartColumn: 7
+EndColumn:   24
+Secret:      secretvalue
+Match:       TOKEN=secretvalue
+Tags:        [decoded:base64 decode-depth:1]
+```
+
+The column range points to the encoded text `c2VjcmV0dmFsdWU=` in the original file, while `Secret` contains the decoded `secretvalue`.

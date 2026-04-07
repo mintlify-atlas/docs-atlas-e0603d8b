@@ -1,97 +1,71 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Gitleaks"
+description: "Detect hardcoded secrets like API keys, passwords, and tokens in git repositories, files, and more."
 ---
 
-## Setting up
+Gitleaks is an open-source SAST tool that scans git repositories, directories, and arbitrary input for hardcoded secrets. With 150+ built-in detection rules and a flexible TOML configuration system, Gitleaks helps teams prevent credentials from leaking into source code.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install Gitleaks via Homebrew, Docker, or from source on any platform.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run your first scan in under 2 minutes.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Configuration" icon="sliders" href="/configuration/overview">
+    Write custom detection rules and allowlists using TOML.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Integrations" icon="plug" href="/integrations/github-actions">
+    Integrate with GitHub Actions, pre-commit hooks, and CI/CD pipelines.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## How it works
 
-Everything you need to create world-class documentation.
+Gitleaks scans content using detection rules — each rule contains a regular expression, optional entropy threshold, and keyword filters. When a match is found, Gitleaks reports it as a finding with full context: the matched secret, file, line, commit, author, and a unique fingerprint.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+<Steps>
+  <Step title="Install Gitleaks">
+    Download and install the binary for your platform. Available via Homebrew, Docker, or direct binary download.
+  </Step>
+  <Step title="Run a scan">
+    Point Gitleaks at a git repository, directory, or pipe data through stdin. Gitleaks uses its built-in ruleset by default.
+  </Step>
+  <Step title="Review findings">
+    Findings are printed to the terminal with full context. Export to JSON, CSV, JUnit, or SARIF for integration with other tooling.
+  </Step>
+  <Step title="Tune with configuration">
+    Add a `.gitleaks.toml` to your repository to extend rules, add allowlists, and suppress false positives.
+  </Step>
+</Steps>
 
-## Need inspiration?
+## Scanning modes
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<CardGroup cols={3}>
+  <Card title="git" icon="code-branch" href="/scanning/git">
+    Scan git history, staged changes, and pre-commit diffs.
+  </Card>
+  <Card title="dir" icon="folder-open" href="/scanning/directory">
+    Scan directories and individual files directly.
+  </Card>
+  <Card title="stdin" icon="terminal" href="/scanning/stdin">
+    Pipe arbitrary content through stdin for flexible workflows.
+  </Card>
+</CardGroup>
+
+## Advanced features
+
+<CardGroup cols={2}>
+  <Card title="Reporting" icon="file-lines" href="/advanced/reporting">
+    Export findings to JSON, CSV, JUnit, SARIF, or custom Go templates.
+  </Card>
+  <Card title="Decoding" icon="lock-open" href="/advanced/decoding">
+    Automatically detect and decode base64, hex, and percent-encoded secrets.
+  </Card>
+  <Card title="Archive scanning" icon="file-zipper" href="/advanced/archive-scanning">
+    Scan secrets inside zip files, tarballs, and nested archives.
+  </Card>
+  <Card title="Composite rules" icon="layer-group" href="/advanced/composite-rules">
+    Build multi-part rules with proximity matching for precise detection.
+  </Card>
+</CardGroup>

@@ -1,0 +1,174 @@
+---
+title: 'Detection rules'
+description: 'Write custom detection rules using regexes, entropy thresholds, keywords, and path filters to identify secrets in your codebase.'
+---
+
+Rules are the core of gitleaks. Each `[[rules]]` table describes a pattern that constitutes a secret. When gitleaks processes content it runs every active rule against each chunk of text and reports matches as findings.
+
+## Rule fields
+
+<AccordionGroup>
+  <Accordion title="id (required)">
+    A unique string identifier for the rule. Used in reports, in `--enable-rule`, in `disabledRules`, and in `targetRules` allowlists. Must not be empty.
+
+    ```toml
+    id = "my-api-key"
+    ```
+  </Accordion>
+
+  <Accordion title="description">
+    A short, human-readable summary of what the rule detects. Appears in scan output and reports.
+
+    ```toml
+    description = "Detects My Service API keys"
+    ```
+  </Accordion>
+
+  <Accordion title="regex">
+    A Go regular expression matched against the content being scanned. Go's regex engine is RE2-based and **does not support lookaheads or lookbehinds**.
+
+    ```toml
+    regex = '''(?i)myservice[_\-\s]?(?:api[_\-\s]?)?key[_\-\s]*[=:>]+[^\s]{20,40}'''
+    ```
+
+    <Warning>
+      Go's `regexp` package uses RE2 syntax, which does not support lookaheads (`(?=...)`, `(?!...)`) or lookbehinds (`(?<=...)`, `(?<!...)`). Patterns copied from other tools may need to be rewritten.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="secretGroup">
+    An integer identifying which regex capture group holds the actual secret value. Defaults to `0` (the full match). When `entropy` is also set, it is evaluated against this group's value.
+
+    ```toml
+    regex       = '''(?i)myservice[_\-\s]?key[_\-\s]*[=:>]+([^\s]{20,40})'''
+    secretGroup = 1
+    ```
+  </Accordion>
+
+  <Accordion title="entropy">
+    Minimum [Shannon entropy](https://en.wikipedia.org/wiki/Entropy_(information_theory)) that the `secretGroup` capture (or the full match when `secretGroup = 0`) must have for the finding to be reported. Floating-point value.
+
+    Use entropy to cut false positives on rules whose regex is necessarily broad — placeholder values, example strings, and English words have lower entropy than real keys.
+
+    ```toml
+    entropy = 3.5
+    ```
+
+    Typical values used in the default config range from **3.0** (looser) to **4.5** (stricter). A completely random 32-character alphanumeric string scores around 3.8–4.0.
+  </Accordion>
+
+  <Accordion title="path">
+    A Go regular expression matched against the file path. Can be used alone (as a path-only rule) or alongside `regex` to restrict a pattern to certain file types.
+
+    ```toml
+    # Only flag matches inside .env files
+    path = '''(?i)\.env(\.\w+)?$'''
+    ```
+
+    When both `regex` and `path` are specified, both must match for a finding to be reported.
+  </Accordion>
+
+  <Accordion title="keywords">
+    An array of lowercase strings used as a fast pre-filter. Before evaluating `regex`, gitleaks checks whether at least one keyword appears in the content using an [Aho-Corasick](https://en.wikipedia.org/wiki/Aho%E2%80%93Corasick_algorithm) trie. Rules without keywords skip this check.
+
+    ```toml
+    keywords = ["myservice", "mysvc", "my_service"]
+    ```
+
+    Keywords should be substrings that are distinctive to the secret type — part of the variable name, a known token prefix, or a service-specific string. Keep them lowercase; gitleaks normalises the input before matching.
+  </Accordion>
+
+  <Accordion title="tags">
+    An array of arbitrary strings attached to the rule for metadata and reporting purposes. Tags are included in findings and can be used downstream to categorise results.
+
+    ```toml
+    tags = ["api-key", "myservice", "cloud"]
+    ```
+  </Accordion>
+
+  <Accordion title="skipReport">
+    When `true`, matches for this rule are not included in the findings output. This is useful for auxiliary rules that exist only to satisfy a `[[rules.required]]` constraint in a composite rule.
+
+    ```toml
+    skipReport = true
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Full example rule
+
+The following example is taken directly from the gitleaks README and shows every supported field:
+
+```toml
+[[rules]]
+id          = "awesome-rule-1"
+description = "awesome rule 1"
+
+# Go regex — no lookaheads supported
+regex       = '''one-go-style-regex-for-this-rule'''
+
+# Extract the secret from capture group 3 and check its entropy
+secretGroup = 3
+entropy     = 3.5
+
+# Restrict rule to specific file paths
+path        = '''a-file-path-regex'''
+
+# Keyword pre-filter (Aho-Corasick, case-insensitive)
+keywords    = [
+  "auth",
+  "password",
+  "token",
+]
+
+tags = ["tag", "another tag"]
+```
+
+## A realistic custom rule
+
+Here is a complete, practical rule for a hypothetical service that issues API keys with the prefix `svckey-` followed by 32 hex characters:
+
+```toml
+[[rules]]
+id          = "acme-service-api-key"
+description = "Detects ACME service API keys"
+regex       = '''(?i)\bacme[_\-]?(?:api[_\-]?)?key[_\-\s]*[=:>]+\s*(svckey-[0-9a-f]{32})\b'''
+secretGroup = 1
+entropy     = 3.5
+keywords    = ["acme", "svckey"]
+tags        = ["api-key", "acme"]
+
+    [[rules.allowlists]]
+    description = "Ignore placeholder values used in documentation"
+    stopwords   = ["example", "placeholder", "your-key-here"]
+```
+
+## How keywords work as pre-filters
+
+When a rule has `keywords`, gitleaks builds a global Aho-Corasick trie from all keywords across all rules. For each chunk of content scanned, gitleaks first checks which keywords are present. A rule is only evaluated with its `regex` if at least one of its keywords matched.
+
+This makes keyword selection important for performance: a keyword that is too common (e.g. `"key"`) offers little filtering benefit, while one that is too restrictive may miss variations of the secret. Aim for strings that appear in the variable name or as a fixed prefix in the token itself.
+
+<Tip>
+  Use a keyword that is part of the token's fixed prefix (e.g. `"glpat-"` for GitLab personal access tokens) whenever the format allows it. This gives near-zero false negatives while dramatically reducing the number of regex evaluations.
+</Tip>
+
+## Entropy in practice
+
+Shannon entropy measures randomness in a string on a scale from 0 (fully uniform) to log₂(alphabet size) (fully random). For a 32-character alphanumeric string:
+
+- `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` → ~0.0 (all same character)
+- `password123` → ~2.9 (English word + digits)
+- `aB3xQ7nP2mK9wL4rD6vH1jS8tY5uI0eF` → ~4.0 (random-looking)
+
+Setting `entropy = 3.5` filters out dictionary words and placeholder strings while allowing genuinely random-looking values through.
+
+## Selecting rules with --enable-rule
+
+By default all rules in the active config are evaluated. Use `--enable-rule` to restrict scanning to a specific set of rule IDs:
+
+```bash
+gitleaks git --enable-rule aws-access-key-id --enable-rule github-pat .
+```
+
+Rules not listed are skipped entirely. This is useful in CI pipelines where you want to enforce only a curated subset of checks.

@@ -1,0 +1,141 @@
+---
+title: 'Configuration overview'
+description: 'Understand the Gitleaks configuration file format, how configs are loaded, and the top-level sections available to you.'
+---
+
+Gitleaks is configured via a [TOML](https://toml.io) file. You can write a config from scratch, extend the built-in default ruleset, or combine both approaches. The file is composed of a small set of top-level keys and section arrays.
+
+## Config loading order
+
+When gitleaks starts, it looks for a configuration in the following order. The first match wins:
+
+<Steps>
+  <Step title="--config / -c flag">
+    An explicit path passed on the command line takes highest precedence.
+
+    ```bash
+    gitleaks git --config /home/dev/customgitleaks.toml .
+    ```
+  </Step>
+  <Step title="GITLEAKS_CONFIG environment variable">
+    Set this variable to a file path and gitleaks will load that file.
+
+    ```bash
+    export GITLEAKS_CONFIG="/home/dev/customgitleaks.toml"
+    gitleaks git .
+    ```
+  </Step>
+  <Step title="GITLEAKS_CONFIG_TOML environment variable">
+    Set this variable to the raw TOML content (not a path). Useful in CI environments where writing a file is inconvenient.
+
+    ```bash
+    export GITLEAKS_CONFIG_TOML=$(cat customgitleaks.toml)
+    gitleaks git .
+    ```
+  </Step>
+  <Step title=".gitleaks.toml in the target path">
+    If the scan target is a directory, gitleaks looks for `.gitleaks.toml` at its root.
+
+    ```bash
+    gitleaks git .   # loads ./.gitleaks.toml if present
+    ```
+  </Step>
+  <Step title="Built-in default config">
+    If none of the above are found, gitleaks falls back to the default configuration compiled into the binary. The latest version is available on GitHub at [gitleaks/gitleaks/blob/master/config/gitleaks.toml](https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml).
+  </Step>
+</Steps>
+
+<Note>
+  When the source is a file (not a directory), gitleaks skips the `.gitleaks.toml` lookup and falls back directly to the default config.
+</Note>
+
+## Minimal config example
+
+The only required top-level key is `title`. A valid, minimal config looks like this:
+
+```toml
+title = "My config"
+```
+
+Of course, a config with no `[[rules]]` detects nothing. In practice you will either define rules or extend the default config.
+
+## Top-level sections
+
+<AccordionGroup>
+  <Accordion title="title">
+    A human-readable name for the configuration file.
+
+    ```toml
+    title = "Custom Gitleaks configuration"
+    ```
+  </Accordion>
+
+  <Accordion title="minVersion">
+    The minimum Gitleaks version required to use this config. If the running binary is older, a warning is logged.
+
+    ```toml
+    minVersion = "v8.25.0"
+    ```
+  </Accordion>
+
+  <Accordion title="[extend]">
+    Controls whether this config inherits rules from another config. Use `useDefault = true` to extend the built-in ruleset, or `path` to extend from a file. The two options cannot be combined. See [Extending configurations](/configuration/extending) for full details.
+
+    ```toml
+    [extend]
+    useDefault = true
+    disabledRules = ["generic-api-key"]
+    ```
+  </Accordion>
+
+  <Accordion title="[[rules]]">
+    An array of detection rule tables. Each rule describes a regex pattern (and optional entropy threshold, path filter, keywords, and allowlists) that gitleaks should flag as a secret. See [Detection rules](/configuration/rules) for full field documentation.
+
+    ```toml
+    [[rules]]
+    id          = "my-api-key"
+    description = "My service API key"
+    regex       = '''myservice-[0-9a-zA-Z]{32}'''
+    keywords    = ["myservice"]
+    ```
+  </Accordion>
+
+  <Accordion title="[[allowlists]]">
+    Global allowlists that apply across all rules. A finding suppressed by a global allowlist is ignored regardless of which rule produced it. See [Allowlists](/configuration/allowlists) for full field documentation.
+
+    ```toml
+    [[allowlists]]
+    description = "Ignore test fixtures"
+    paths = ['''tests/fixtures/.*''']
+    ```
+
+    <Warning>
+      `[allowlist]` (singular, bracket notation) was the old format and was replaced by `[[allowlists]]` in v8.25.0. The singular form still works but is deprecated and will be removed in v9.
+    </Warning>
+  </Accordion>
+</AccordionGroup>
+
+## Configuration-related flags
+
+Several CLI flags affect how configuration is resolved at runtime:
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--config` | `-c` | Path to the config file to use. |
+| `--enable-rule` | | Only activate specific rule IDs; all others are disabled. Accepts a comma-separated list. |
+| `--gitleaks-ignore-path` | `-i` | Path to a `.gitleaksignore` file or a directory containing one (default: `.`). |
+| `--ignore-gitleaks-allow` | | Disables recognition of `gitleaks:allow` inline comments. |
+
+## The .gitleaksignore file
+
+In addition to the TOML config, you can suppress specific findings by fingerprint using a `.gitleaksignore` file. Each gitleaks finding includes a `Fingerprint` field (introduced in v8.10.0) that uniquely identifies the secret by commit, file, rule, and line:
+
+```
+cd5226711335c68be1e720b318b7bc3135a30eb2:cmd/generate/config/rules/sidekiq.go:sidekiq-secret:23
+```
+
+Add one fingerprint per line to `.gitleaksignore` to permanently suppress that finding. Gitleaks looks for this file in the target directory and in the path specified by `--gitleaks-ignore-path`.
+
+<Tip>
+  The `.gitleaksignore` approach is useful for suppressing known false positives that are difficult to eliminate through regex allowlists, such as test vectors checked into source control.
+</Tip>

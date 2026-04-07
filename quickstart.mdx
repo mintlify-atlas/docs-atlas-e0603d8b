@@ -1,80 +1,126 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Run your first Gitleaks scan and understand the output in a few commands."
 ---
 
-## Get started in three steps
+## Run your first scan
 
-Get your documentation site running locally and make your first customization.
+<Steps>
+  <Step title="Install Gitleaks">
+    Install Gitleaks using your preferred method. On macOS with Homebrew:
 
-### Step 1: Set up your local environment
+    ```bash
+    brew install gitleaks
+    ```
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    For other platforms, see the [installation guide](/installation).
+  </Step>
 
-### Step 2: Deploy your changes
+  <Step title="Scan a git repository">
+    Run `gitleaks git` against any local git repository. Use `-v` to print each finding to the terminal as it is found:
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```bash
+    gitleaks git -v /path/to/your/repo
+    ```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    If you run the command from inside the repository directory, you can omit the path:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash
+    cd /path/to/your/repo
+    gitleaks git -v
+    ```
 
-### Step 3: Go live
+    The `git` command scans the full commit history using `git log -p` under the hood.
+  </Step>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+  <Step title="Understand the output">
+    When Gitleaks finds a secret, it prints a structured finding. Each field identifies what was found, where it lives, and who introduced it:
 
-## Next steps
+    ```text
+    Finding:     "export BUNDLE_ENTERPRISE__CONTRIBSYS__COM=cafebabe:deadbeef",
+    Secret:      cafebabe:deadbeef
+    RuleID:      sidekiq-secret
+    Entropy:     2.609850
+    File:        cmd/generate/config/rules/sidekiq.go
+    Line:        23
+    Commit:      cd5226711335c68be1e720b318b7bc3135a30eb2
+    Author:      John
+    Email:       john@users.noreply.github.com
+    Date:        2022-08-03T12:31:40Z
+    Fingerprint: cd5226711335c68be1e720b318b7bc3135a30eb2:cmd/generate/config/rules/sidekiq.go:sidekiq-secret:23
+    ```
 
-Now that you have your docs running, explore these key features:
+    | Field | Description |
+    |-------|-------------|
+    | `Finding` | The full line or string that matched the rule |
+    | `Secret` | The extracted secret value |
+    | `RuleID` | The ID of the rule that triggered |
+    | `Entropy` | Shannon entropy of the secret — higher values indicate more randomness |
+    | `File` | Path to the file containing the secret |
+    | `Line` | Line number within the file |
+    | `Commit` | Git commit SHA where the secret was introduced |
+    | `Author` / `Email` | The committer who introduced the secret |
+    | `Fingerprint` | Unique identifier for this specific finding |
+
+    At the end of the scan, Gitleaks prints a summary of how many bytes were scanned, how long it took, and how many leaks were found.
+  </Step>
+
+  <Step title="Export a report">
+    Save findings to a file using `--report-path`. The format is inferred from the file extension, or you can set it explicitly with `--report-format`:
+
+    ```bash
+    # Save as JSON (format inferred from extension)
+    gitleaks git --report-path gitleaks-report.json
+
+    # Save as SARIF for IDE or GitHub Code Scanning integration
+    gitleaks git --report-path report.sarif --report-format sarif
+
+    # Save as CSV
+    gitleaks git --report-path report.csv --report-format csv
+    ```
+
+    Supported formats are `json`, `csv`, `junit`, `sarif`, and `template`.
+  </Step>
+</Steps>
+
+## Common flags for first-time users
+
+| Flag | Description |
+|------|-------------|
+| `-v`, `--verbose` | Print each finding to the terminal as it is found |
+| `-r`, `--report-path` | Path to write the report file |
+| `-f`, `--report-format` | Output format: `json`, `csv`, `junit`, `sarif`, `template` |
+| `-c`, `--config` | Path to a custom `.gitleaks.toml` configuration file |
+| `--exit-code` | Override the exit code when leaks are found (default: `1`) |
+| `--baseline-path` | Path to a previous report — only new findings are reported |
+
+<Tip>
+Use `--baseline-path` when scanning a repository with an existing history of known findings. Generate a baseline first with `gitleaks git --report-path baseline.json`, then pass `--baseline-path baseline.json` on subsequent runs to surface only new issues.
+</Tip>
+
+## Exit codes
+
+Gitleaks exits with a predictable code so it integrates cleanly into CI scripts:
+
+```text
+0   - no leaks present
+1   - leaks or error encountered
+126 - unknown flag
+```
+
+## What to do next
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="git scanning" icon="code-branch" href="/scanning/git">
+    Scan specific commit ranges, branches, and staged changes.
+  </Card>
+  <Card title="dir scanning" icon="folder-open" href="/scanning/directory">
+    Scan file trees and individual files without git history.
+  </Card>
+  <Card title="Configuration" icon="sliders" href="/configuration/overview">
+    Write custom rules and allowlists to reduce false positives.
+  </Card>
+  <Card title="Integrations" icon="plug" href="/integrations/github-actions">
+    Add Gitleaks to GitHub Actions, pre-commit hooks, and other CI/CD systems.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

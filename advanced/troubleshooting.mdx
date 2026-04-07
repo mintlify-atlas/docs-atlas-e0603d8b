@@ -1,0 +1,258 @@
+---
+title: "Troubleshooting"
+description: "Common issues and solutions when running Gitleaks, including exit codes, false positives, performance, rule debugging, and diagnostics."
+---
+
+<AccordionGroup>
+
+  <Accordion title="Exit codes">
+    Gitleaks exits with one of three codes:
+
+    | Code | Meaning |
+    |---|---|
+    | `0` | Scan completed with no leaks found |
+    | `1` | Leaks were found, or an error occurred during the scan |
+    | `126` | An unknown flag was passed to the command |
+
+    You can override the exit code used when leaks are found with `--exit-code`:
+
+    ```bash
+    gitleaks git --exit-code 2 .
+    echo $?  # prints 2 if leaks found, 0 if clean
+    ```
+
+    This is useful in CI pipelines where downstream tools expect a specific non-zero exit code.
+  </Accordion>
+
+  <Accordion title="Suppressing false positives">
+    Gitleaks provides several mechanisms to ignore known-safe findings.
+
+    **Inline `gitleaks:allow` comments**
+
+    Add a `gitleaks:allow` comment to the end of any line containing a test secret or known-safe value:
+
+    ```python
+    discord_client_secret = '8dyfuiRyq=vVc3RRr_edRk-fK__JItpZ'  #gitleaks:allow
+    ```
+
+    Pass `--ignore-gitleaks-allow` to disable this behavior and report all findings regardless of inline comments.
+
+    **`.gitleaksignore` file**
+
+    Add a finding's `Fingerprint` value to a `.gitleaksignore` file to permanently suppress that specific finding. Each fingerprint is on its own line:
+
+    ```
+    cd5226711335c68be1e720b318b7bc3135a30eb2:cmd/rules/sidekiq.go:sidekiq-secret:23
+    ```
+
+    By default Gitleaks looks for `.gitleaksignore` in the current working directory. Use `--gitleaks-ignore-path` to specify a different path.
+
+    **Rule-level allowlists**
+
+    Define `[[rules.allowlists]]` in your config to suppress findings based on commit SHA, file path, regex match, or stopwords:
+
+    ```toml
+    [[rules]]
+    id = "my-rule"
+    regex = '''...'''
+
+      [[rules.allowlists]]
+      description = "Ignore test fixtures"
+      paths = ['''tests/fixtures/''']
+
+      [[rules.allowlists]]
+      stopwords = ["example", "placeholder"]
+    ```
+
+    **Baseline**
+
+    For repositories with a long history, create a baseline report of existing findings and use it to suppress them on future scans:
+
+    ```bash
+    # Create baseline
+    gitleaks git --report-path baseline.json .
+
+    # Subsequent scans only report new findings
+    gitleaks git --baseline-path baseline.json --report-path findings.json .
+    ```
+  </Accordion>
+
+  <Accordion title="Rule not triggering">
+    If a rule is not firing when you expect it to, check each of the following.
+
+    **Keywords must appear in the content**
+
+    Rules with a `keywords` field require at least one keyword to be present in the scanned content before the regex is even evaluated. Keywords are lowercased and compared as plain substring matches. If your content does not contain the keyword, the rule is skipped entirely.
+
+    ```toml
+    [[rules]]
+    id = "my-rule"
+    keywords = ["api_key"]  # content must contain "api_key" (case-insensitive)
+    regex = '''...'''
+    ```
+
+    Check that your keyword is actually present in the file or diff being scanned.
+
+    **Go regex has no lookaheads**
+
+    Gitleaks uses Go's `regexp` package, which does not support lookaheads (`(?=...)`) or lookbehinds (`(?<=...)`). If your regex uses these constructs it will fail to compile or silently not match:
+
+    ```toml
+    # ✗ Invalid in Go regex
+    regex = '''(?i)(?<=api_key=)[a-z0-9]{32}'''
+
+    # ✓ Rewrite without lookahead
+    regex = '''(?i)api_key=([a-z0-9]{32})'''
+    secretGroup = 1
+    ```
+
+    **Entropy threshold too high**
+
+    If `entropy` is set on the rule, the captured secret (or `secretGroup`) must have a Shannon entropy at or above the threshold. Low-entropy test strings like `aaaaaaaaaaaaaaaa` will not trigger a rule with `entropy = 3.5`.
+
+    Test your regex and entropy threshold against the actual secret value using the [Gitleaks playground](https://gitleaks.io/playground).
+
+    **`secretGroup` out of range**
+
+    If `secretGroup` references a capture group index that does not exist in the regex, Gitleaks will reject the rule during config validation with an error like:
+
+    ```
+    invalid regex secret group 2, max regex secret group 1
+    ```
+
+    Count your capture groups carefully — group 0 is the full match, group 1 is the first `(...)`, and so on.
+  </Accordion>
+
+  <Accordion title="Slow scans">
+    **Skip large files**
+
+    Use `--max-target-megabytes` to skip files above a size threshold:
+
+    ```bash
+    gitleaks dir --max-target-megabytes 10 /path/to/scan
+    ```
+
+    Any file larger than the specified number of megabytes is skipped before scanning begins.
+
+    **Add keywords as prefilters**
+
+    Rules with `keywords` skip regex evaluation entirely when none of the keywords appear in the content. Adding specific, unique keywords to your rules significantly reduces the number of regex evaluations performed on each file.
+
+    **Add path allowlists**
+
+    If specific directories or file types are reliably clean (e.g., generated code, vendored dependencies, binary assets), add path allowlists to skip them:
+
+    ```toml
+    [[allowlists]]
+    description = "Skip generated and vendor directories"
+    paths = [
+      '''vendor/''',
+      '''node_modules/''',
+      '''.*\.min\.js$''',
+    ]
+    ```
+
+    **Use a baseline for large git histories**
+
+    For repositories with a long commit history, create a baseline first and use `--baseline-path` on subsequent scans so Gitleaks only evaluates new commits:
+
+    ```bash
+    gitleaks git --report-path baseline.json .
+    gitleaks git --baseline-path baseline.json --report-path new-findings.json .
+    ```
+
+    **Enable debug logging**
+
+    Use `--log-level=debug` to see which files are being scanned and how long each takes. This helps identify bottlenecks:
+
+    ```bash
+    gitleaks dir --log-level=debug /path/to/scan 2>&1 | grep -i slow
+    ```
+  </Accordion>
+
+  <Accordion title="Config not loading">
+    Gitleaks loads configuration in the following order of precedence:
+
+    1. `--config/-c` flag (explicit path)
+    2. `GITLEAKS_CONFIG` environment variable (path to a config file)
+    3. `GITLEAKS_CONFIG_TOML` environment variable (TOML content directly)
+    4. `.gitleaks.toml` in the target scan path
+    5. Built-in default config (if none of the above apply)
+
+    If the target path is a file (not a directory), step 4 is skipped and the default config is used.
+
+    **Diagnose config loading with debug logging**
+
+    ```bash
+    gitleaks dir --log-level=debug /path/to/scan
+    ```
+
+    Debug output includes a message like:
+
+    ```
+    using gitleaks config /path/to/.gitleaks.toml from `(--source)/.gitleaks.toml`
+    ```
+
+    or
+
+    ```
+    no gitleaks config found in path /path/.gitleaks.toml, using default gitleaks config
+    ```
+
+    **Common config errors**
+
+    - `rule |id| is missing or empty` — every `[[rules]]` entry requires a non-empty `id` field
+    - `both |regex| and |path| are empty, this rule will have no effect` — a rule must have at least one of `regex` or `path`
+    - `[[rules.required]] rule ID 'X' does not exist` — a composite rule references an auxiliary rule ID that is not defined in the config
+    - `[allowlist] is deprecated` — upgrade `[rules.allowlist]` to `[[rules.allowlists]]` (introduced in v8.21.0) and `[allowlist]` to `[[allowlists]]` (introduced in v8.25.0)
+  </Accordion>
+
+  <Accordion title="Diagnostics for performance profiling">
+    Gitleaks has a built-in diagnostics mode for profiling CPU, memory, and execution traces. Use `--diagnostics` to enable it.
+
+    **Available modes:**
+
+    | Mode | Description |
+    |---|---|
+    | `cpu` | CPU profiling (writes `cpu.pprof`) |
+    | `mem` | Memory profiling (writes `mem.pprof`) |
+    | `trace` | Execution tracing (writes `trace.out`) |
+    | `http` | Serves profiles live at `http://localhost:6060/debug/pprof/` |
+
+    Multiple modes can be combined with commas:
+
+    ```bash
+    # Write CPU and memory profiles to the current directory
+    gitleaks dir --diagnostics cpu,mem /path/to/scan
+
+    # Write profiles to a specific directory
+    gitleaks dir \
+      --diagnostics cpu,mem,trace \
+      --diagnostics-dir /tmp/profiles \
+      /path/to/scan
+
+    # Serve profiles over HTTP for live inspection with go tool pprof
+    gitleaks dir --diagnostics http /path/to/scan
+    ```
+
+    Profile files are written when the scan completes. Use `go tool pprof` to analyze them:
+
+    ```bash
+    go tool pprof cpu.pprof
+    go tool pprof mem.pprof
+    go tool trace trace.out
+    ```
+  </Accordion>
+
+  <Accordion title="Getting help">
+    - **GitHub Issues:** Report bugs or unexpected behavior at [github.com/gitleaks/gitleaks/issues](https://github.com/gitleaks/gitleaks/issues)
+    - **Discord:** Join the community at [discord.gg/8Hzbrnkr7E](https://discord.gg/8Hzbrnkr7E)
+
+    When reporting an issue, include:
+    - The Gitleaks version (`gitleaks version`)
+    - The command you ran
+    - The output with `--log-level=debug`
+    - Your config file (with any secrets removed)
+  </Accordion>
+
+</AccordionGroup>

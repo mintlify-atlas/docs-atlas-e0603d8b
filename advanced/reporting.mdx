@@ -1,0 +1,224 @@
+---
+title: "Reporting"
+description: "Generate findings reports in JSON, CSV, JUnit, SARIF, or custom Go template formats. Control output path, format, and secret redaction."
+---
+
+Gitleaks can write scan results to a file or stdout in several structured formats. Use `--report-path` to specify where to write the report and `--report-format` to choose the format.
+
+```bash
+gitleaks git --report-path findings.json --report-format json .
+```
+
+If `--report-format` is omitted, Gitleaks infers the format from the file extension (`.json`, `.csv`, `.sarif`).
+
+## Finding fields
+
+Every finding is a structured record. The table below documents all fields as defined in `report/finding.go`.
+
+| Field | Type | Description |
+|---|---|---|
+| `RuleID` | string | ID of the rule that matched |
+| `Description` | string | Human-readable description of the rule |
+| `StartLine` | int | Line number where the match begins |
+| `EndLine` | int | Line number where the match ends |
+| `StartColumn` | int | Column number where the match begins |
+| `EndColumn` | int | Column number where the match ends |
+| `Match` | string | The full regex match string |
+| `Secret` | string | The captured secret value extracted from the match |
+| `File` | string | Path to the file containing the finding |
+| `SymlinkFile` | string | If the file is a symlink, the resolved target path |
+| `Commit` | string | Git commit SHA (git scan only) |
+| `Entropy` | float32 | Shannon entropy of the captured secret |
+| `Author` | string | Git commit author name (git scan only) |
+| `Email` | string | Git commit author email (git scan only) |
+| `Date` | string | Git commit date (git scan only) |
+| `Message` | string | Git commit message (git scan only) |
+| `Tags` | []string | Metadata tags (from the rule, plus decoding tags when applicable) |
+| `Fingerprint` | string | Unique identifier for this finding: `commit:file:ruleID:line` |
+| `Link` | string | URL to the commit (omitted when empty) |
+
+<Note>
+The `Line` field is populated during scanning but is excluded from JSON output (`json:"-"`). It contains the full raw line of source text where the secret was found.
+</Note>
+
+## Built-in formats
+
+<Tabs>
+  <Tab title="json">
+    A JSON array of finding objects. Each object corresponds to one finding and includes all exported fields.
+
+    ```bash
+    gitleaks git --report-path findings.json --report-format json .
+    ```
+
+    ```json
+    [
+     {
+      "Description": "Sidekiq Secret",
+      "StartLine": 23,
+      "EndLine": 23,
+      "StartColumn": 1,
+      "EndColumn": 56,
+      "Match": "export BUNDLE_ENTERPRISE__CONTRIBSYS__COM=cafebabe:deadbeef",
+      "Secret": "cafebabe:deadbeef",
+      "File": "cmd/generate/config/rules/sidekiq.go",
+      "Commit": "cd5226711335c68be1e720b318b7bc3135a30eb2",
+      "Entropy": 2.60985,
+      "Author": "John",
+      "Email": "john@users.noreply.github.com",
+      "Date": "2022-08-03T12:31:40Z",
+      "Message": "add sidekiq rule",
+      "Tags": [],
+      "RuleID": "sidekiq-secret",
+      "Fingerprint": "cd5226711335c68be1e720b318b7bc3135a30eb2:cmd/generate/config/rules/sidekiq.go:sidekiq-secret:23"
+     }
+    ]
+    ```
+  </Tab>
+  <Tab title="csv">
+    A CSV file with a header row. Columns are fixed in this order:
+
+    `RuleID`, `Commit`, `File`, `SymlinkFile`, `Secret`, `Match`, `StartLine`, `EndLine`, `StartColumn`, `EndColumn`, `Author`, `Message`, `Date`, `Email`, `Fingerprint`, `Tags`
+
+    A `Link` column is appended when at least one finding has a non-empty `Link` value.
+
+    ```bash
+    gitleaks git --report-path findings.csv --report-format csv .
+    ```
+  </Tab>
+  <Tab title="junit">
+    JUnit XML format. Each finding maps to a `<testcase>` element with a `<failure>` child that contains the full finding serialized as JSON. Useful for integrating with CI systems that consume JUnit test results.
+
+    ```bash
+    gitleaks git --report-path findings.xml --report-format junit .
+    ```
+
+    The `<testsuite>` element has `name="gitleaks"`, and its `failures` and `tests` attributes both equal the number of findings.
+  </Tab>
+  <Tab title="sarif">
+    SARIF 2.1.0 format. Compatible with GitHub Advanced Security, Azure DevOps, and other SARIF consumers. The output includes:
+
+    - A `tool.driver` with all matched rules and their descriptions
+    - Per-finding `locations` with `startLine`, `endLine`, `startColumn`, `endColumn`, and a `snippet` containing the secret value
+    - `partialFingerprints` carrying commit SHA, author, email, date, and commit message
+    - `properties.tags` from the finding
+
+    ```bash
+    gitleaks git --report-path findings.sarif --report-format sarif .
+    ```
+
+    If the finding has a `SymlinkFile`, the SARIF `artifactLocation.uri` uses the symlink target path instead of the original file path.
+  </Tab>
+</Tabs>
+
+## Writing to stdout
+
+Use `"-"` as the report path to write the report to stdout instead of a file:
+
+```bash
+gitleaks dir --report-path "-" --report-format json /path/to/scan | jq '.[] | .RuleID'
+```
+
+## Custom templates
+
+Use the `template` format with `--report-template` to render findings using any Go `text/template` file. The template receives a `[]Finding` slice as its root data.
+
+```bash
+gitleaks dir \
+  --report-path report.html \
+  --report-format template \
+  --report-template report_templates/basic.tmpl \
+  /path/to/scan
+```
+
+<Note>
+Specifying `--report-template` without `--report-format template` is an error. The template format requires both flags.
+</Note>
+
+### Sprig functions
+
+Templates have access to the full [Sprig](https://masterminds.github.io/sprig/) function library, with the following functions removed for security reasons: `env`, `expandenv`, `getHostByName`.
+
+This gives you string manipulation, math, date formatting, encoding helpers, and more inside your templates.
+
+### Example: custom JSON with all fields
+
+The following template (from the Gitleaks README) produces a JSON array that includes the `Line` field, which is excluded from the default JSON reporter:
+
+```gotemplate
+# jsonextra.tmpl
+[{{ $lastFinding := (sub (len . ) 1) }}
+{{- range $i, $finding := . }}{{with $finding}}
+    {
+        "Description": {{ quote .Description }},
+        "StartLine": {{ .StartLine }},
+        "EndLine": {{ .EndLine }},
+        "StartColumn": {{ .StartColumn }},
+        "EndColumn": {{ .EndColumn }},
+        "Line": {{ quote .Line }},
+        "Match": {{ quote .Match }},
+        "Secret": {{ quote .Secret }},
+        "File": "{{ .File }}",
+        "SymlinkFile": {{ quote .SymlinkFile }},
+        "Commit": {{ quote .Commit }},
+        "Entropy": {{ .Entropy }},
+        "Author": {{ quote .Author }},
+        "Email": {{ quote .Email }},
+        "Date": {{ quote .Date }},
+        "Message": {{ quote .Message }},
+        "Tags": [{{ $lastTag := (sub (len .Tags ) 1) }}{{ range $j, $tag := .Tags }}{{ quote . }}{{ if ne $j $lastTag }},{{ end }}{{ end }}],
+        "RuleID": {{ quote .RuleID }},
+        "Fingerprint": {{ quote .Fingerprint }}
+    }{{ if ne $i $lastFinding }},{{ end }}
+{{- end}}{{ end }}
+]
+```
+
+Usage:
+
+```bash
+gitleaks dir ~/leaky-repo/ \
+  --report-path report.json \
+  --report-format template \
+  --report-template testdata/report/jsonextra.tmpl
+```
+
+### Built-in HTML templates
+
+The `report_templates/` directory in the Gitleaks repository includes several ready-to-use HTML templates that render findings as an interactive web page:
+
+- `basic.tmpl` — Clean light/dark mode table with filtering by rule and file
+- `w98.tmpl` — Windows 98 aesthetic
+- `wxp.tmpl` — Windows XP aesthetic
+- `leet.tmpl` — l33t aesthetic
+- `myspace.tmpl` — Myspace aesthetic
+
+```bash
+gitleaks dir /path/to/scan \
+  --report-path index.html \
+  --report-format template \
+  --report-template report_templates/basic.tmpl
+```
+
+Then open `index.html` in a browser to view an interactive findings report.
+
+## Redacting secrets
+
+Use `--redact` to mask secret values in the report output, verbose terminal output, and logs. The flag accepts an integer from 0 to 100 representing the percentage of the secret to redact.
+
+```bash
+# Fully redact all secrets (replaces value with "REDACTED")
+gitleaks git --redact .
+
+# Redact 50% of each secret (keeps first half, appends "...")
+gitleaks git --redact=50 .
+
+# Redact 20% of each secret (keeps first 80%)
+gitleaks git --redact=20 .
+```
+
+When `--redact` is passed without a value, it defaults to 100% (full redaction).
+
+<Warning>
+Redaction modifies the `Secret`, `Match`, and `Line` fields in the output. The original secret value is not recoverable from a redacted report.
+</Warning>

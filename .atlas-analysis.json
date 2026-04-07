@@ -1,0 +1,104 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "Gitleaks",
+  "projectDescription": "Gitleaks is an open-source SAST tool for detecting hardcoded secrets like API keys, passwords, and tokens in git repositories, directories, and stdin.",
+  "theme": "aspen",
+  "primaryColor": "#414141",
+  "lightColor": null,
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Scanning",
+            "pages": [
+              "scanning/git",
+              "scanning/directory",
+              "scanning/stdin",
+              "scanning/baseline"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/overview",
+              "configuration/rules",
+              "configuration/allowlists",
+              "configuration/extending"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/github-actions",
+              "integrations/pre-commit",
+              "integrations/docker",
+              "integrations/ci-cd"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/reporting",
+              "advanced/decoding",
+              "advanced/archive-scanning",
+              "advanced/composite-rules",
+              "advanced/troubleshooting"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Scan git repositories, directories, files, and stdin for secrets",
+    "150+ built-in detection rules for popular secret patterns (API keys, tokens, passwords)",
+    "Configurable TOML-based rules with regex, entropy, and keyword filtering",
+    "GitHub Actions and pre-commit hook integrations",
+    "Multiple report formats: JSON, CSV, JUnit, SARIF, and custom Go templates",
+    "Allowlists to suppress false positives by commit, path, regex, or stopword",
+    "Composite/multi-part rules with proximity matching (withinLines/withinColumns)",
+    "Automatic decoding of base64, hex, and percent-encoded secrets",
+    "Archive scanning support (zip, tar, etc.) with configurable recursion depth",
+    "Baseline support to suppress previously-known findings"
+  ],
+  "publicApiSurface": [
+    "gitleaks git [flags] [repo]",
+    "gitleaks dir [flags] [path]",
+    "gitleaks stdin",
+    "gitleaks version",
+    "--config / -c <path>",
+    "--report-path / -r <path>",
+    "--report-format / -f <json|csv|junit|sarif|template>",
+    "--report-template <path>",
+    "--baseline-path / -b <path>",
+    "--enable-rule <rule-id>",
+    "--redact [0-100]",
+    "--max-decode-depth <n>",
+    "--max-archive-depth <n>",
+    "--max-target-megabytes <n>",
+    "--exit-code <n>",
+    "--verbose / -v",
+    "--log-level <trace|debug|info|warn|error|fatal>",
+    "--gitleaks-ignore-path / -i <path>",
+    "--ignore-gitleaks-allow",
+    "--staged (git command)",
+    "--pre-commit (git command)",
+    "--log-opts <git-log-opts> (git command)",
+    "--follow-symlinks (dir command)",
+    "GITLEAKS_CONFIG env var",
+    "GITLEAKS_CONFIG_TOML env var",
+    ".gitleaks.toml config file",
+    ".gitleaksignore file"
+  ]
+}

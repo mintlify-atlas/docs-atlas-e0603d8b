@@ -1,0 +1,74 @@
+---
+title: "Installation"
+description: "Install Gitleaks on macOS, Linux, or Windows using Homebrew, Docker, a pre-built binary, or from source."
+---
+
+## Install Gitleaks
+
+Choose the method that fits your environment.
+
+<CodeGroup>
+
+```bash macOS (Homebrew)
+brew install gitleaks
+```
+
+```bash Docker (DockerHub)
+docker pull zricethezav/gitleaks:latest
+docker run -v ${path_to_host_folder_to_scan}:/path zricethezav/gitleaks:latest [COMMAND] [OPTIONS] [SOURCE_PATH]
+```
+
+```bash Docker (ghcr.io)
+docker pull ghcr.io/gitleaks/gitleaks:latest
+docker run -v ${path_to_host_folder_to_scan}:/path ghcr.io/gitleaks/gitleaks:latest [COMMAND] [OPTIONS] [SOURCE_PATH]
+```
+
+```bash From source
+# Requires Go to be installed
+git clone https://github.com/gitleaks/gitleaks.git
+cd gitleaks
+make build
+```
+
+</CodeGroup>
+
+### Binary download
+
+Pre-built binaries are available for macOS, Linux, and Windows on the [Gitleaks releases page](https://github.com/gitleaks/gitleaks/releases). Binaries are published for the following platforms:
+
+| OS | Architectures |
+|----|--------------|
+| macOS (darwin) | amd64 (x64), arm64 |
+| Linux | amd64 (x64), x86 (x32), arm, arm64 |
+| Windows | amd64 (x64), x86 (x32) |
+
+Download the archive for your platform, extract it, and place the `gitleaks` binary somewhere on your `PATH`.
+
+## Verify the installation
+
+After installing, confirm Gitleaks is available and check the version:
+
+```bash
+gitleaks version
+```
+
+## Docker usage
+
+When running Gitleaks via Docker, mount the directory you want to scan to `/path` inside the container and pass the scan command as arguments to the image.
+
+```bash
+# Scan a local git repository
+docker run -v /path/to/your/repo:/path zricethezav/gitleaks:latest git /path
+
+# Scan a directory
+docker run -v /path/to/your/repo:/path zricethezav/gitleaks:latest dir /path
+```
+
+<Note>
+The Docker image is built on Alpine Linux and includes `bash`, `git`, and `openssh-client`. The entrypoint is `gitleaks`, so you pass subcommands and flags directly as arguments.
+</Note>
+
+## Pre-commit hook
+
+Gitleaks can run automatically before every commit using the pre-commit framework. See the [pre-commit integration guide](/integrations/pre-commit) for setup instructions.
+

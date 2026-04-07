@@ -1,0 +1,211 @@
+---
+title: "Scanning directories and files"
+description: "Use gitleaks dir to scan a directory or individual file for secrets without any git history."
+---
+
+The `gitleaks dir` command scans the contents of directories and files directly,
+without consulting any git history. It walks the target path recursively and
+checks every file against your configured detection rules.
+
+```bash
+gitleaks dir [flags] [path]
+```
+
+**Aliases:** `file`, `directory` — all three names invoke the same command.
+
+If no path is provided, gitleaks scans the current working directory.
+
+## Basic usage
+
+```bash
+# Scan the current directory
+gitleaks dir .
+
+# Scan a specific directory
+gitleaks dir /path/to/project
+
+# Scan a single file
+gitleaks dir /path/to/secrets.env
+
+# Scan with verbose output
+gitleaks dir -v /path/to/project
+
+# Save findings to a report
+gitleaks dir --report-path findings.json /path/to/project
+```
+
+## Skipping large files
+
+By default, gitleaks scans all files regardless of size. Use
+`--max-target-megabytes` to skip files that exceed a given size threshold.
+This is useful for repositories containing large binary assets or data files.
+
+```bash
+# Skip files larger than 10 MB
+gitleaks dir --max-target-megabytes 10 .
+```
+
+Files that exceed the limit produce a warning log entry and are skipped. Empty
+files are always skipped automatically.
+
+## Following symlinks
+
+By default, symbolic links are not followed. Enable symlink traversal with
+`--follow-symlinks`.
+
+```bash
+gitleaks dir --follow-symlinks /path/to/project
+```
+
+<Note>
+  Symlinks that resolve to directories are never followed, even when
+  `--follow-symlinks` is set. Only file symlinks are traversed.
+</Note>
+
+## Scanning archives
+
+Gitleaks can extract and scan the contents of archive files (zip, tar, gzip,
+and other formats supported by the [archives](https://github.com/mholt/archives)
+library). Archive scanning is disabled by default.
+
+```bash
+# Scan into archives up to 2 levels deep
+gitleaks dir --max-archive-depth 2 /path/to/project
+```
+
+When a secret is found inside an archive, the `File` field in the finding uses
+`!` as a separator to show the full nested path:
+
+```
+File: build/artifacts.tar.gz!config/.env.prod
+```
+
+## Command-specific flags
+
+<ParamField path="--follow-symlinks" type="boolean" default="false">
+  Scan files that are symbolic links to other files. Symlinks pointing to
+  directories are always skipped.
+</ParamField>
+
+## Global flags
+
+<ParamField path="-v, --verbose" type="boolean" default="false">
+  Print each finding to stdout as it is detected.
+</ParamField>
+
+<ParamField path="-c, --config" type="string" default="">
+  Path to a `.gitleaks.toml` configuration file. Config resolution order:
+  1. `--config` / `-c` flag
+  2. `GITLEAKS_CONFIG` environment variable (file path)
+  3. `GITLEAKS_CONFIG_TOML` environment variable (file content)
+  4. `.gitleaks.toml` in the target path
+
+  Falls back to the built-in default config if none of the above are found.
+</ParamField>
+
+<ParamField path="-r, --report-path" type="string" default="">
+  Write findings to this file. Use `-` to write to stdout. The format is
+  inferred from the file extension (`.json`, `.csv`, `.sarif`) unless
+  `--report-format` is also set.
+</ParamField>
+
+<ParamField path="-f, --report-format" type="string" default="">
+  Output format for the report. Accepted values: `json`, `csv`, `junit`,
+  `sarif`, `template`.
+</ParamField>
+
+<ParamField path="--report-template" type="string" default="">
+  Path to a Go `text/template` file for custom report output. Implies
+  `--report-format=template`.
+</ParamField>
+
+<ParamField path="-b, --baseline-path" type="string" default="">
+  Path to a previous gitleaks JSON report. Findings present in the baseline
+  are suppressed from output. See [Using baselines](/scanning/baseline).
+</ParamField>
+
+<ParamField path="--exit-code" type="number" default="1">
+  Exit code returned when leaks are found. Set to `0` to avoid non-zero
+  exits when findings are expected.
+</ParamField>
+
+<ParamField path="--max-target-megabytes" type="number" default="0">
+  Skip files larger than this size in megabytes. `0` means no limit.
+</ParamField>
+
+<ParamField path="--max-archive-depth" type="number" default="0">
+  Scan into nested archives up to this depth. `0` disables archive traversal.
+</ParamField>
+
+<ParamField path="--max-decode-depth" type="number" default="5">
+  Recursively decode encoded content (base64, hex, percent) up to this many
+  levels deep. `0` disables decoding.
+</ParamField>
+
+<ParamField path="--redact" type="number" default="100">
+  Redact secrets from logs and stdout. Accepts a percentage from `0` to `100`.
+  `--redact` alone defaults to `100%`. Example: `--redact=20`.
+</ParamField>
+
+<ParamField path="-l, --log-level" type="string" default="info">
+  Log verbosity level. Accepted values: `trace`, `debug`, `info`, `warn`,
+  `error`, `fatal`.
+</ParamField>
+
+<ParamField path="-i, --gitleaks-ignore-path" type="string" default=".">
+  Path to a `.gitleaksignore` file or the folder containing one.
+</ParamField>
+
+<ParamField path="--ignore-gitleaks-allow" type="boolean" default="false">
+  Ignore `gitleaks:allow` inline comments.
+</ParamField>
+
+<ParamField path="--enable-rule" type="string[]" default="[]">
+  Run only the specified rule IDs. All other rules are disabled.
+</ParamField>
+
+<ParamField path="--no-color" type="boolean" default="false">
+  Disable color in verbose output.
+</ParamField>
+
+<ParamField path="--no-banner" type="boolean" default="false">
+  Suppress the gitleaks ASCII banner.
+</ParamField>
+
+<ParamField path="--timeout" type="number" default="0">
+  Abort the scan after this many seconds. `0` means no timeout.
+</ParamField>
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0`  | No secrets found |
+| `1`  | Secrets found, or an error occurred |
+| `126` | Unknown flag provided |
+
+## Common examples
+
+<CodeGroup>
+
+```bash Scan a directory verbosely
+gitleaks dir -v /path/to/project
+```
+
+```bash Scan a single file
+gitleaks dir /path/to/.env
+```
+
+```bash Skip large files and follow symlinks
+gitleaks dir --max-target-megabytes 5 --follow-symlinks .
+```
+
+```bash Scan with custom config and JSON report
+gitleaks dir --config .gitleaks.toml --report-path report.json .
+```
+
+```bash Scan inside archives
+gitleaks dir --max-archive-depth 3 /path/to/project
+```
+
+</CodeGroup>

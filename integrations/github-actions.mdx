@@ -1,0 +1,112 @@
+---
+title: "GitHub Actions"
+description: "Scan for secrets in your GitHub repositories using the official Gitleaks Action or the gitleaks binary directly in your workflows."
+---
+
+## Using the official Gitleaks Action
+
+The [Gitleaks GitHub Action](https://github.com/gitleaks/gitleaks-action) is the recommended way to integrate Gitleaks into GitHub-hosted repositories. It runs on every pull request, push, or manual trigger and reports any leaked secrets directly in the GitHub UI.
+
+<Steps>
+  <Step title="Create the workflow file">
+    Add a new file at `.github/workflows/gitleaks.yml` in your repository with the following content:
+
+    ```yaml .github/workflows/gitleaks.yml
+    name: gitleaks
+    on: [pull_request, push, workflow_dispatch]
+    jobs:
+      scan:
+        name: gitleaks
+        runs-on: ubuntu-latest
+        steps:
+          - uses: actions/checkout@v3
+            with:
+              fetch-depth: 0
+          - uses: gitleaks/gitleaks-action@v2
+            env:
+              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+    ```
+  </Step>
+  <Step title="Add your license secret (organizations only)">
+    If your repository belongs to a GitHub Organization, add your `GITLEAKS_LICENSE` key as a repository or organization secret in **Settings → Secrets and variables → Actions**.
+
+    Personal account repositories do not require a license.
+  </Step>
+</Steps>
+
+<Note>
+  `fetch-depth: 0` is required. Without it, `actions/checkout` only fetches the latest commit, so Gitleaks cannot scan full git history. Omitting this option will cause the scan to miss secrets introduced in earlier commits.
+</Note>
+
+<Note>
+  `GITLEAKS_LICENSE` is only required for repositories owned by a GitHub Organization. Personal account repositories can omit this environment variable entirely.
+</Note>
+
+## Using the gitleaks binary directly
+
+If you prefer not to use the action, you can install and run the gitleaks binary as a workflow step. This gives you full control over flags and report handling.
+
+```yaml .github/workflows/gitleaks-binary.yml
+name: gitleaks (binary)
+on: [pull_request, push, workflow_dispatch]
+jobs:
+  scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          GITLEAKS_VERSION=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | jq -r .tag_name | tr -d v)
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz
+          sudo mv gitleaks /usr/local/bin/
+
+      - name: Run gitleaks
+        run: gitleaks git --exit-code 1 --report-format sarif --report-path gitleaks.sarif
+
+      - name: Upload SARIF report
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks.sarif
+```
+
+## Exit codes
+
+Gitleaks uses the following exit codes, which GitHub Actions maps directly to step success or failure:
+
+| Code | Meaning |
+|------|---------|
+| `0`  | No leaks found |
+| `1`  | Leaks or error encountered |
+| `126` | Unknown flag passed |
+
+You can override the exit code for leak findings with `--exit-code`:
+
+```bash
+# Exit with code 2 when leaks are found, instead of 1
+gitleaks git --exit-code 2
+```
+
+## Uploading SARIF results to the GitHub Security tab
+
+Gitleaks supports the SARIF report format, which GitHub can ingest and display in the **Security → Code scanning** tab. Use the `github/codeql-action/upload-sarif` action to upload the report after the scan.
+
+```yaml
+- name: Run gitleaks (SARIF output)
+  run: gitleaks git --report-format sarif --report-path gitleaks.sarif
+  continue-on-error: true
+
+- name: Upload SARIF to GitHub Security tab
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: gitleaks.sarif
+```
+
+<Tip>
+  Set `continue-on-error: true` on the gitleaks step so the SARIF upload step always runs, even when leaks are detected. Without it, a non-zero exit code from gitleaks will skip the upload step.
+</Tip>

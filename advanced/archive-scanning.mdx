@@ -1,0 +1,89 @@
+---
+title: "Archive scanning"
+description: "Scan secrets inside ZIP files, tarballs, and other archive formats using --max-archive-depth."
+---
+
+Secrets are sometimes committed or deployed inside archive files — ZIP bundles, tarballs, or compressed artifacts. By default Gitleaks treats archive files as opaque binary blobs and does not look inside them. The `--max-archive-depth` flag enables automatic extraction and scanning of archive contents.
+
+```bash
+# Enable archive scanning with a depth limit of 2
+gitleaks dir --max-archive-depth 2 /path/to/scan
+```
+
+The default value is `0`, which disables archive scanning entirely.
+
+## Supported formats
+
+Archive scanning uses the [mholt/archives](https://github.com/mholt/archives) package. All compression and archive formats supported by that package are supported by Gitleaks. This includes:
+
+- **Archive formats:** tar, zip, rar, 7z, and others supported by the package
+- **Compression formats:** gzip, bzip2, xz, zstd, lz4, brotli, and others supported by the package
+
+Refer to the [mholt/archives supported formats documentation](https://github.com/mholt/archives?tab=readme-ov-file#supported-archive-formats) for the full list.
+
+## Scan types
+
+Archive scanning works with both `dir` and `git` scan types:
+
+```bash
+# Scan a directory tree, extracting archives
+gitleaks dir --max-archive-depth 3 /path/to/directory
+
+# Scan a git repository, extracting archives found in commits
+gitleaks git --max-archive-depth 3 /path/to/repo
+```
+
+## Finding paths for nested archives
+
+When a secret is found inside an archive, the `File` field in the finding uses `!` as a separator between each nesting level:
+
+```
+testdata/archives/nested.tar.gz!archives/files.tar!files/.env.prod
+```
+
+This means the secret was found in:
+1. `files/.env.prod` — inside
+2. `archives/files.tar` — inside
+3. `testdata/archives/nested.tar.gz`
+
+A complete finding looks like:
+
+```
+Finding:     DB_PASSWORD=8ae31cacf141669ddfb5da
+File:        testdata/archives/nested.tar.gz!archives/files.tar!files/.env.prod
+Line:        4
+Commit:      6e6ee6596d337bb656496425fb98644eb62b4a82
+Fingerprint: 6e6ee6596d337bb656496425fb98644eb62b4a82:testdata/archives/nested.tar.gz!archives/files.tar!files/.env.prod:generic-api-key:4
+Link:        https://github.com/leaktk/gitleaks/blob/6e6ee6596d337bb656496425fb98644eb62b4a82/testdata/archives/nested.tar.gz
+```
+
+<Note>
+The `Link` field points to the outermost archive in the git repository. The inner path after `!` separators identifies the file inside the archive chain.
+</Note>
+
+## Recursive scanning
+
+Archives can contain other archives. Setting `--max-archive-depth` to a value greater than 1 enables recursive extraction:
+
+```bash
+gitleaks dir --max-archive-depth 5 /path/to/scan
+```
+
+Recursion stops automatically when no new archives are found at a given level. The depth limit only sets the maximum number of nesting levels to descend, not the number of passes. If your archives are only two levels deep, a depth of 5 performs no extra work.
+
+<Tip>
+Start with `--max-archive-depth 2` for most use cases. Deeply nested archives are rare in practice and a higher limit increases memory usage proportionally to the size of the extracted content.
+</Tip>
+
+## Performance considerations
+
+Extracting archives requires reading and decompressing file content in memory. Scanning large repositories with many large archives will increase both scan time and memory usage. Consider combining archive scanning with `--max-target-megabytes` to skip archives above a size threshold:
+
+```bash
+gitleaks dir \
+  --max-archive-depth 2 \
+  --max-target-megabytes 10 \
+  /path/to/scan
+```
+
+This skips any individual file (including archive files) larger than 10 MB before attempting extraction.

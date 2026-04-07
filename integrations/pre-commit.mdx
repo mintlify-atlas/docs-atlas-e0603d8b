@@ -1,0 +1,125 @@
+---
+title: "Pre-commit hook"
+description: "Run Gitleaks automatically before every commit using the pre-commit framework to catch secrets before they reach your repository."
+---
+
+## Overview
+
+Gitleaks integrates with the [pre-commit](https://pre-commit.com) framework to scan staged changes before every `git commit`. When a secret is detected, the commit is blocked and the finding is reported in the terminal.
+
+```
+➜ git commit -m "this commit contains a secret"
+Detect hardcoded secrets.................................................Failed
+```
+
+## Hook IDs
+
+Gitleaks provides three hook IDs in its [`.pre-commit-hooks.yaml`](https://github.com/gitleaks/gitleaks/blob/master/.pre-commit-hooks.yaml):
+
+| Hook ID | Language | Description |
+|---------|----------|-------------|
+| `gitleaks` | `golang` | Runs the locally installed gitleaks binary (installed by pre-commit into a managed Go environment) |
+| `gitleaks-docker` | `docker_image` | Runs gitleaks using the official Docker image (`zricethezav/gitleaks`) |
+| `gitleaks-system` | `system` | Runs the gitleaks binary already installed on your system |
+
+All three hooks run: `gitleaks git --pre-commit --redact --staged --verbose`
+
+## Setup
+
+<Steps>
+  <Step title="Install pre-commit">
+    Follow the installation instructions at [pre-commit.com](https://pre-commit.com/#install). For example, using pip:
+
+    ```bash
+    pip install pre-commit
+    ```
+  </Step>
+  <Step title="Create .pre-commit-config.yaml">
+    Add a `.pre-commit-config.yaml` file at the root of your repository. Use the `gitleaks` hook ID for a native Go execution:
+
+    ```yaml .pre-commit-config.yaml
+    repos:
+      - repo: https://github.com/gitleaks/gitleaks
+        rev: v8.24.2
+        hooks:
+          - id: gitleaks
+    ```
+
+    To use the Docker image instead of a locally managed Go binary, use the `gitleaks-docker` hook ID:
+
+    ```yaml .pre-commit-config.yaml
+    repos:
+      - repo: https://github.com/gitleaks/gitleaks
+        rev: v8.24.2
+        hooks:
+          - id: gitleaks-docker
+    ```
+
+    To use a gitleaks binary already present on your system `PATH`, use `gitleaks-system`:
+
+    ```yaml .pre-commit-config.yaml
+    repos:
+      - repo: https://github.com/gitleaks/gitleaks
+        rev: v8.24.2
+        hooks:
+          - id: gitleaks-system
+    ```
+  </Step>
+  <Step title="Update to the latest revision">
+    Run the following command to automatically update the `rev` field to the latest released version:
+
+    ```bash
+    pre-commit autoupdate
+    ```
+  </Step>
+  <Step title="Install the hook">
+    ```bash
+    pre-commit install
+    ```
+
+    The hook is now active. Gitleaks will scan your staged changes on every `git commit`.
+  </Step>
+</Steps>
+
+## Staged scanning
+
+All three hook IDs pass the `--staged` flag to gitleaks. This means only the files currently staged for the commit are scanned, not the entire repository history. This keeps the hook fast and focused on changes being introduced.
+
+The `--redact` flag is also passed by default, which redacts the secret value from terminal output to avoid leaking it further during the hook run.
+
+## Skipping the hook
+
+To skip the gitleaks hook for a single commit, prepend `SKIP=gitleaks` to your commit command:
+
+```bash
+SKIP=gitleaks git commit -m "skip gitleaks check"
+```
+
+```
+Detect hardcoded secrets................................................Skipped
+```
+
+<Warning>
+  Skipping the hook bypasses secret detection for that commit. Use this only when you are certain the flagged content is not a real secret (for example, a known test fixture). Consider adding a `gitleaks:allow` comment or a `.gitleaksignore` entry as a permanent solution instead.
+</Warning>
+
+## Manual pre-commit hook (without the pre-commit framework)
+
+You can also run Gitleaks as a Git-native pre-commit hook without the pre-commit framework by copying the `pre-commit.py` script from the Gitleaks repository into your `.git/hooks/` directory:
+
+```bash
+cp scripts/pre-commit.py .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+This script checks `git config --bool hooks.gitleaks` to determine whether the hook is enabled. You can disable it with:
+
+```bash
+git config hooks.gitleaks false
+```
+
+And re-enable it with:
+
+```bash
+git config hooks.gitleaks true
+```

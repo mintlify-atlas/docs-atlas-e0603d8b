@@ -1,0 +1,253 @@
+---
+title: "Scanning git repositories"
+description: "Use gitleaks git to scan a repository's full commit history for secrets."
+---
+
+The `gitleaks git` command scans a local git repository for secrets. Under the hood, gitleaks runs `git log -p -U0 --full-history --all --diff-filter=tuxdb` to walk every patch in the repository's history and checks each added line against your configured rules.
+
+```bash
+gitleaks git [flags] [repo]
+```
+
+If no path is provided, gitleaks scans the current working directory.
+
+<Note>
+  The `detect` command was deprecated in v8.19.0. Use `gitleaks git` instead.
+  A translation guide is available at the [migration gist](https://gist.github.com/zricethezav/b325bb93ebf41b9c0b0507acf12810d2).
+</Note>
+
+## Basic usage
+
+```bash
+# Scan the current directory
+gitleaks git .
+
+# Scan a repository at a specific path
+gitleaks git /path/to/repo
+
+# Scan with verbose output
+gitleaks git -v .
+
+# Scan and save findings to a JSON report
+gitleaks git --report-path findings.json .
+```
+
+## Scanning a commit range
+
+Pass git log options via `--log-opts` to control which commits are scanned. This is especially useful when you want to scan only a range of commits in CI rather than the full history.
+
+```bash
+gitleaks git -v --log-opts="--all commitA..commitB" /path/to/repo
+```
+
+Any argument accepted by `git log` can be passed through `--log-opts`. See the [git log documentation](https://git-scm.com/docs/git-log) for all available options.
+
+<Warning>
+  Do not wrap individual `--log-opts` values in quotes (e.g., `"--all"`). Quoted
+  option values may not be interpreted correctly. Pass them unquoted within the
+  string: `--log-opts="--all commitA..commitB"`.
+</Warning>
+
+## Pre-commit and staged scanning
+
+<Tabs>
+  <Tab title="Staged changes">
+    Scan only the changes that are currently staged for the next commit. This is
+    the recommended mode for pre-commit hooks.
+
+    ```bash
+    gitleaks git --staged .
+    ```
+
+    Internally this runs `git diff -U0 --no-ext-diff --staged .`.
+  </Tab>
+  <Tab title="Unstaged changes">
+    Scan all working-tree changes (staged and unstaged) using `git diff`.
+
+    ```bash
+    gitleaks git --pre-commit .
+    ```
+
+    Internally this runs `git diff -U0 --no-ext-diff .`.
+  </Tab>
+</Tabs>
+
+<Tip>
+  For pre-commit hook integration, use the [pre-commit framework](https://pre-commit.com)
+  with the official gitleaks hook rather than calling `--staged` manually. See
+  the [pre-commit integration guide](/integrations/pre-commit) for setup instructions.
+</Tip>
+
+## Generating links to findings
+
+When `--platform` is set, gitleaks enriches each finding with a link back to
+the commit on your source control platform. When `--platform` is omitted,
+gitleaks auto-detects the platform from the repository's remote URL for known
+hosts (`github.com`, `gitlab.com`, `dev.azure.com`, `gitea.com`, `codeberg.org`,
+`bitbucket.org`). Use `--platform` to force a specific platform or to support
+self-hosted instances.
+
+```bash
+gitleaks git --platform github .
+gitleaks git --platform azuredevops .
+gitleaks git --platform none .  # disable link generation
+```
+
+Accepted values: `github`, `gitlab`, `azuredevops`, `gitea`, `bitbucket`, `none`.
+
+## Command-specific flags
+
+<ParamField path="--staged" type="boolean" default="false">
+  Scan staged changes only (`git diff --staged`). Intended for use in pre-commit hooks.
+</ParamField>
+
+<ParamField path="--pre-commit" type="boolean" default="false">
+  Scan working-tree changes using `git diff`. When either `--staged` or
+  `--pre-commit` is set, remote platform links are not generated.
+</ParamField>
+
+<ParamField path="--log-opts" type="string" default="">
+  Options passed verbatim to `git log`. Use this to scan a branch, date range,
+  or specific commit range. Example: `--log-opts="--all commitA..commitB"`.
+</ParamField>
+
+<ParamField path="--platform" type="string" default="">
+  Target SCM platform used to generate links in findings. Accepted values:
+  `github`, `gitlab`, `azuredevops`, `gitea`, `bitbucket`, `none`. When not
+  set, gitleaks auto-detects the platform from the remote URL for known hosts.
+  Use `none` to explicitly disable link generation.
+</ParamField>
+
+## Global flags
+
+These flags are available on all gitleaks commands.
+
+<ParamField path="-v, --verbose" type="boolean" default="false">
+  Print each finding to stdout as it is detected.
+</ParamField>
+
+<ParamField path="-c, --config" type="string" default="">
+  Path to a `.gitleaks.toml` configuration file. Config resolution order:
+  1. `--config` / `-c` flag
+  2. `GITLEAKS_CONFIG` environment variable (file path)
+  3. `GITLEAKS_CONFIG_TOML` environment variable (file content)
+  4. `.gitleaks.toml` in the target path
+  
+  Falls back to the built-in default config if none of the above are found.
+</ParamField>
+
+<ParamField path="-r, --report-path" type="string" default="">
+  Write findings to this file. Use `-` to write to stdout. The format is
+  inferred from the file extension (`.json`, `.csv`, `.sarif`) unless
+  `--report-format` is also set.
+</ParamField>
+
+<ParamField path="-f, --report-format" type="string" default="">
+  Output format for the report. Accepted values: `json`, `csv`, `junit`,
+  `sarif`, `template`.
+</ParamField>
+
+<ParamField path="--report-template" type="string" default="">
+  Path to a Go `text/template` file for custom report output. Implies
+  `--report-format=template`.
+</ParamField>
+
+<ParamField path="-b, --baseline-path" type="string" default="">
+  Path to a previous gitleaks JSON report. Findings present in the baseline
+  are suppressed from output. See [Using baselines](/scanning/baseline).
+</ParamField>
+
+<ParamField path="--exit-code" type="number" default="1">
+  Exit code returned when leaks are found. Defaults to `1`. Set to `0` to
+  prevent non-zero exits in pipelines where findings are expected.
+</ParamField>
+
+<ParamField path="--redact" type="number" default="100">
+  Redact secrets from logs and stdout. Accepts a percentage from `0` to `100`.
+  `--redact` with no value defaults to `100%` redaction. Example: `--redact=20`
+  redacts 20% of each secret.
+</ParamField>
+
+<ParamField path="-l, --log-level" type="string" default="info">
+  Log verbosity level. Accepted values: `trace`, `debug`, `info`, `warn`,
+  `error`, `fatal`.
+</ParamField>
+
+<ParamField path="--max-target-megabytes" type="number" default="0">
+  Skip files larger than this size in megabytes. `0` means no limit.
+</ParamField>
+
+<ParamField path="--max-decode-depth" type="number" default="5">
+  Recursively decode encoded content (base64, hex, percent) up to this many
+  levels deep. `0` disables decoding.
+</ParamField>
+
+<ParamField path="--max-archive-depth" type="number" default="0">
+  Scan into nested archives (zip, tar, etc.) up to this depth. `0` disables
+  archive traversal.
+</ParamField>
+
+<ParamField path="-i, --gitleaks-ignore-path" type="string" default=".">
+  Path to a `.gitleaksignore` file or the folder containing one.
+</ParamField>
+
+<ParamField path="--ignore-gitleaks-allow" type="boolean" default="false">
+  Ignore `gitleaks:allow` inline comments that would otherwise suppress a finding.
+</ParamField>
+
+<ParamField path="--enable-rule" type="string[]" default="[]">
+  Run only the specified rule IDs. All other rules are disabled. Example:
+  `--enable-rule=aws-access-token --enable-rule=generic-api-key`.
+</ParamField>
+
+<ParamField path="--no-color" type="boolean" default="false">
+  Disable color in verbose output.
+</ParamField>
+
+<ParamField path="--no-banner" type="boolean" default="false">
+  Suppress the gitleaks ASCII banner.
+</ParamField>
+
+<ParamField path="--timeout" type="number" default="0">
+  Abort the scan after this many seconds. `0` means no timeout.
+</ParamField>
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0`  | No secrets found |
+| `1`  | Secrets found, or an error occurred |
+| `126` | Unknown flag provided |
+
+The exit code for findings can be overridden with `--exit-code`.
+
+## Common examples
+
+<CodeGroup>
+
+```bash Scan full history verbosely
+gitleaks git -v .
+```
+
+```bash Scan a range of commits
+gitleaks git -v --log-opts="--all abc123..def456" /path/to/repo
+```
+
+```bash Save report and suppress banner
+gitleaks git --no-banner --report-path report.json .
+```
+
+```bash Use a custom config and redact secrets
+gitleaks git --config /path/to/.gitleaks.toml --redact .
+```
+
+```bash Scan staged changes (pre-commit)
+gitleaks git --staged .
+```
+
+```bash Scan with GitHub links in findings
+gitleaks git --platform github .
+```
+
+</CodeGroup>

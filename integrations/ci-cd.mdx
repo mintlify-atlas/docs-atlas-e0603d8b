@@ -1,0 +1,198 @@
+---
+title: "CI/CD integration"
+description: "Integrate Gitleaks into any CI/CD pipeline to automatically detect secrets on every push, pull request, or merge."
+---
+
+## Overview
+
+Gitleaks can be dropped into any CI/CD system that can run shell commands or Docker containers. The core integration pattern is the same regardless of the platform:
+
+1. Check out the repository with full git history
+2. Run `gitleaks git` (or `gitleaks dir` for non-git targets)
+3. Fail the pipeline if the exit code is non-zero
+
+## Exit codes
+
+Gitleaks uses three exit codes that your pipeline should handle:
+
+| Code | Meaning |
+|------|---------|
+| `0`  | No leaks present — pipeline can continue |
+| `1`  | Leaks or error encountered — pipeline should fail |
+| `126` | Unknown flag passed — indicates a misconfiguration |
+
+You can override the exit code used when leaks are found with `--exit-code`:
+
+```bash
+# Use exit code 2 for leaks (keeps exit code 1 for errors only)
+gitleaks git --exit-code 2
+```
+
+## Configuration via environment variable
+
+In CI environments, you can inject a custom configuration file path without modifying workflow files by setting `GITLEAKS_CONFIG`:
+
+```bash
+export GITLEAKS_CONFIG="/path/to/ci-gitleaks.toml"
+gitleaks git .
+```
+
+You can also pass the full TOML content directly as an environment variable:
+
+```bash
+export GITLEAKS_CONFIG_TOML=$(cat .gitleaks.toml)
+gitleaks git .
+```
+
+The full order of precedence for configuration loading is:
+
+1. `--config` / `-c` flag
+2. `GITLEAKS_CONFIG` environment variable (file path)
+3. `GITLEAKS_CONFIG_TOML` environment variable (file content)
+4. `.gitleaks.toml` in the target path
+
+## SARIF report output
+
+Use the SARIF format to feed findings into security dashboards that support it (GitHub Advanced Security, Azure DevOps, GitLab Security, etc.):
+
+```bash
+gitleaks git --report-format sarif --report-path gitleaks.sarif
+```
+
+## Using baselines to avoid re-reporting old findings
+
+When scanning a repository with a long history for the first time, you may want to establish a baseline of existing findings and only fail on new ones going forward.
+
+<Steps>
+  <Step title="Generate the baseline report">
+    ```bash
+    gitleaks git --report-path gitleaks-baseline.json
+    ```
+  </Step>
+  <Step title="Commit or store the baseline">
+    Store `gitleaks-baseline.json` in your repository or as a CI artifact so it persists between pipeline runs.
+  </Step>
+  <Step title="Run subsequent scans against the baseline">
+    ```bash
+    gitleaks git --baseline-path gitleaks-baseline.json --report-path findings.json
+    ```
+
+    The output in `findings.json` will only contain findings that are not already present in the baseline.
+  </Step>
+</Steps>
+
+<Note>
+  The baseline file is a standard gitleaks JSON report. Findings that match a baseline entry (by rule ID, file, commit, location, and other fields) are suppressed from future results.
+</Note>
+
+## Examples by CI system
+
+<Tabs>
+  <Tab title="GitLab CI">
+    ```yaml .gitlab-ci.yml
+    gitleaks:
+      image: zricethezav/gitleaks:latest
+      stage: test
+      script:
+        - gitleaks git --exit-code 1 /builds/$CI_PROJECT_PATH
+      rules:
+        - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+        - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    ```
+
+    For SARIF output that GitLab can display in the Security tab:
+
+    ```yaml .gitlab-ci.yml
+    gitleaks:
+      image: zricethezav/gitleaks:latest
+      stage: test
+      script:
+        - gitleaks git
+            --exit-code 1
+            --report-format sarif
+            --report-path gitleaks.sarif
+            /builds/$CI_PROJECT_PATH
+      artifacts:
+        reports:
+          sast: gitleaks.sarif
+        when: always
+    ```
+  </Tab>
+  <Tab title="CircleCI">
+    ```yaml .circleci/config.yml
+    version: 2.1
+    jobs:
+      gitleaks:
+        docker:
+          - image: zricethezav/gitleaks:latest
+        steps:
+          - checkout
+          - run:
+              name: Scan for secrets
+              command: gitleaks git --exit-code 1 .
+
+    workflows:
+      scan:
+        jobs:
+          - gitleaks
+    ```
+  </Tab>
+  <Tab title="Jenkins">
+    ```groovy Jenkinsfile
+    pipeline {
+      agent any
+      stages {
+        stage('Secret scan') {
+          steps {
+            sh '''
+              docker run --rm \
+                -v ${WORKSPACE}:/path \
+                zricethezav/gitleaks:latest \
+                git --exit-code 1 /path
+            '''
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Generic shell">
+    ```bash run-gitleaks.sh
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Install gitleaks (fetches latest version)
+    GITLEAKS_VERSION=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep '"tag_name"' | cut -d '"' -f4 | tr -d v)
+    curl -sSL \
+      "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+      | tar -xz
+    chmod +x gitleaks
+
+    # Scan the repository
+    ./gitleaks git --exit-code 1 --report-format json --report-path gitleaks-report.json .
+
+    echo "No secrets found."
+    ```
+  </Tab>
+</Tabs>
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="Scan on pull requests" icon="code-pull-request">
+    Run Gitleaks on every pull request or merge request to catch secrets before they are merged into the main branch.
+  </Card>
+  <Card title="Scan on push to main" icon="shield-check">
+    Add a scan job triggered on pushes to your default branch as a second line of defense.
+  </Card>
+  <Card title="Use pre-commit locally" icon="laptop-code">
+    Pair CI scanning with the [pre-commit hook](/integrations/pre-commit) so developers catch secrets before pushing at all.
+  </Card>
+  <Card title="Pin image versions" icon="tag">
+    In production pipelines, pin to a specific Gitleaks version tag (e.g., `v8.24.2`) rather than `latest` for reproducible builds.
+  </Card>
+</CardGroup>
+
+<Warning>
+  Always check out the full git history before running `gitleaks git`. Shallow clones (the default in many CI systems) cause Gitleaks to miss secrets introduced in commits outside the fetched range.
+</Warning>
